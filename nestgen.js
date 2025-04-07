@@ -4,13 +4,12 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// 🧠 Chemins
+// 📁 Chemins internes au package
 const CLI_DIR = __dirname;
-const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, './nestjs-generator');
+const ROOT_PATH = path.resolve(CLI_DIR, 'nestjs-generator');
 const FEATURES_PATH = path.join(ROOT_PATH, 'features');
 
-// 🖼️ Logo propre
-
+// 🖼️ Logo
 function printLogo() {
     console.log(`
 ███╗   ██╗███████╗███████╗████████╗ ██████╗ ███████╗███╗   ██╗
@@ -25,46 +24,49 @@ function printLogo() {
 `);
 }
 
-// 🩺 Commande : nestgen doctor
+// 🔍 Vérifie qu’un script existe
+function checkFile(filePath, label) {
+    if (!fs.existsSync(filePath)) {
+        console.error(`❌ ${label} introuvable : ${filePath}`);
+        process.exit(1);
+    }
+}
+
+// 🧪 Diagnostic : nestgen doctor
 function doctor() {
     printLogo();
     console.log("🔬 Diagnostic de l'environnement...\n");
 
-    const results = [];
+    const checks = [
+        { label: 'nestgen.js présent', ok: true },
+        { label: 'generate_project.sh', ok: fs.existsSync(path.join(ROOT_PATH, 'generate_project.sh')) },
+        { label: 'features/', ok: fs.existsSync(FEATURES_PATH) },
+        { label: 'add_module.sh', ok: fs.existsSync(path.join(FEATURES_PATH, 'add_module.sh')) },
+    ];
 
-    // Vérif fichiers
-    results.push({ label: '✅ nestgen.js présent', ok: fs.existsSync(path.join(CLI_DIR, 'nestgen.js')) });
-    results.push({ label: '✅ generate_project.sh présent', ok: fs.existsSync(path.join(ROOT_PATH, 'generate_project.sh')) });
-    results.push({ label: '✅ dossier features/ présent', ok: fs.existsSync(FEATURES_PATH) });
-
-    // Vérif binaire global
     try {
         execSync('command -v nestgen', { stdio: 'ignore' });
-        results.push({ label: '✅ commande nestgen disponible globalement', ok: true });
+        checks.push({ label: 'commande nestgen (global)', ok: true });
     } catch {
-        results.push({ label: '❌ commande nestgen NON disponible globalement', ok: false });
+        checks.push({ label: 'commande nestgen (global)', ok: false });
     }
 
-    // Résultat
-    results.forEach(r => console.log(r.ok ? r.label : `❌ ${r.label}`));
-    const allGood = results.every(r => r.ok);
-    console.log("\n🎯 Résultat :", allGood ? "Tout est OK ✅" : "Des points sont à corriger ⚠️");
+    for (const c of checks) {
+        console.log(c.ok ? `✅ ${c.label}` : `❌ ${c.label}`);
+    }
+
+    console.log("\n🎯 Résultat :", checks.every(c => c.ok) ? "Tout est OK ✅" : "Des points sont à corriger ⚠️");
 }
 
-// 🧱 Commande : nestgen init
+// 🚀 Création de projet : nestgen init
 function initProject() {
     printLogo();
-
     const script = path.join(ROOT_PATH, 'generate_project.sh');
-
-    if (!fs.existsSync(script)) {
-        console.error(`❌ Script introuvable : ${script}`);
-        process.exit(1);
-    }
+    checkFile(script, 'Script de génération');
     execSync(`bash "${script}"`, { stdio: 'inherit' });
 }
 
-// 🧱 Commande : nestgen module <name> --orm=...
+// ➕ Module : nestgen module user --orm=typeorm
 function generateModule(name, orm = 'typeorm') {
     printLogo();
 
@@ -74,15 +76,11 @@ function generateModule(name, orm = 'typeorm') {
     }
 
     const script = path.join(FEATURES_PATH, 'add_module.sh');
-    if (!fs.existsSync(script)) {
-        console.error(`❌ Script introuvable : ${script}`);
-        process.exit(1);
-    }
-
+    checkFile(script, 'Script add_module');
     execSync(`bash "${script}" "${name}" "${orm}"`, { stdio: 'inherit' });
 }
 
-// 🧠 Parse les args
+// 🧠 Commandes CLI
 const args = process.argv.slice(2);
 const command = args[0];
 
