@@ -5,4 +5,4 @@
 ## Installation
 
 ```bash
-npm install -g @tonpseudo/nestgen
+npm install -g @outis23/nestgen
