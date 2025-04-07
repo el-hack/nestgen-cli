@@ -1,0 +1,24 @@
+{
+  "name": "@outis23/nestgen",
+  "version": "0.0.1",
+  "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
+  "bin": {
+    "nestgen": "nestgen.js"
+  },
+  "author": "Ton Nom <ton.email@example.com>",
+  "license": "MIT",
+  "keywords": [
+    "nestjs",
+    "cli",
+    "ddd",
+    "cqrs",
+    "scaffold",
+    "generator",
+    "hexagonal"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tonpseudo/nestgen-cli"
+  },
+  "type": "commonjs"
+}
