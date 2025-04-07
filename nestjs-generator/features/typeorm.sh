@@ -3,7 +3,17 @@
 PM=$1
 APP_NAME=$2
 
-$PM install @nestjs/typeorm typeorm pg
+# ────── Charger les helpers ──────
+FEATURES_PATH="$(dirname "$0")"
+source "$FEATURES_PATH/utils.sh"
+source "$FEATURES_PATH/logger.sh"
 
-# Ajout de config dans app.module.ts manuellement ensuite
-echo "✅ TypeORM installé et prêt. Pense à configurer app.module.ts ou on peut automatiser ça plus tard 😉"
+INSTALL_CMD=$(get_install_cmd "$PM")
+
+log_info "📦 Installation de TypeORM et PostgreSQL..."
+
+$PM $INSTALL_CMD @nestjs/typeorm typeorm pg
+
+log_success "✅ TypeORM installé avec succès"
+
+log_info "💡 TypeORM sera automatiquement configuré dans app.module.ts"

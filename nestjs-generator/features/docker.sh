@@ -1,5 +1,12 @@
 #!/bin/bash
 
+
+# ────── Charger les helpers ──────
+FEATURES_PATH="$(dirname "$0")/features"
+source "$FEATURES_PATH/utils.sh"
+source "$FEATURES_PATH/logger.sh"
+
+
 APP_NAME=$1
 
 cat > Dockerfile <<EOF

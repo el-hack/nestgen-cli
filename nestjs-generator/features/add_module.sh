@@ -20,9 +20,9 @@ CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
 
 MODULE_DIR="src/app/$NAME"
 
-mkdir -p $MODULE_DIR/{core/{application/{commands,events,queries},domain/{entities,ports}},infrastructure/{adapters,persistences/repositories},interfaces/{controllers,dtos}}
+mkdir -p "$MODULE_DIR"/{core/{application/{commands,events,queries},domain/{entities,ports}},infrastructure/{adapters,persistences/repositories},interfaces/{controllers,dtos}}
 
-# --- ENTITIES & PORTS ---
+# --- Entity ---
 cat > "$MODULE_DIR/core/domain/entities/${NAME}.entity.ts" <<EOF
 export class $PASCAL {
   constructor(
@@ -33,6 +33,7 @@ export class $PASCAL {
 }
 EOF
 
+# --- Port ---
 cat > "$MODULE_DIR/core/domain/ports/${NAME}.repository.ts" <<EOF
 import { $PASCAL } from '../entities/${NAME}.entity';
 
@@ -42,13 +43,14 @@ export interface ${PASCAL}RepositoryPort {
 }
 EOF
 
-# --- COMMAND + HANDLER ---
+# --- Command ---
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.command.ts" <<EOF
 export class Create${PASCAL}Command {
   constructor(public readonly name: string, public readonly email: string) {}
 }
 EOF
 
+# --- Command Handler ---
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.handler.ts" <<EOF
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from './create-${NAME}.command';
@@ -67,7 +69,7 @@ export class Create${PASCAL}Handler implements ICommandHandler<Create${PASCAL}Co
 }
 EOF
 
-# --- DTO & CONTROLLER ---
+# --- DTO ---
 cat > "$MODULE_DIR/interfaces/dtos/create-${NAME}.dto.ts" <<EOF
 import { IsEmail, IsString } from 'class-validator';
 
@@ -80,6 +82,7 @@ export class Create${PASCAL}Dto {
 }
 EOF
 
+# --- Controller ---
 cat > "$MODULE_DIR/interfaces/controllers/${NAME}.controller.ts" <<EOF
 import { Controller, Post, Body } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
@@ -100,8 +103,14 @@ export class ${PASCAL}Controller {
 }
 EOF
 
-# --- REPOSITORY (TYPEORM) ---
-cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.orm.ts" <<EOF
+# --- Repositories en fonction de l’ORM ---
+REPO_CLASS=""
+ENTITY_IMPORT=""
+REPO_PROVIDER=""
+
+if [ "$ORM" == "typeorm" ]; then
+  # TypeORM entity
+  cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.orm.ts" <<EOF
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 @Entity('${NAME}s')
@@ -117,7 +126,8 @@ export class ${PASCAL}Entity {
 }
 EOF
 
-cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.typeorm.repository.ts" <<EOF
+  # TypeORM Repository
+  cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.typeorm.repository.ts" <<EOF
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -142,46 +152,87 @@ export class ${PASCAL}TypeOrmRepository implements ${PASCAL}RepositoryPort {
 }
 EOF
 
-# --- MODULE.TS ---
+  REPO_CLASS="${PASCAL}TypeOrmRepository"
+  ENTITY_IMPORT="TypeOrmModule.forFeature([${PASCAL}Entity])"
+  REPO_PROVIDER="{
+      provide: '${PASCAL}RepositoryPort',
+      useClass: ${PASCAL}TypeOrmRepository,
+    }"
+
+elif [ "$ORM" == "prisma" ]; then
+  # Prisma Repository
+  cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.prisma.repository.ts" <<EOF
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@/prisma.service';
+import { ${PASCAL} } from '../../../core/domain/entities/${NAME}.entity';
+import { ${PASCAL}RepositoryPort } from '../../../core/domain/ports/${NAME}.repository';
+
+@Injectable()
+export class ${PASCAL}PrismaRepository implements ${PASCAL}RepositoryPort {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async save(${CAMEL}: ${PASCAL}): Promise<${PASCAL}> {
+    const saved = await this.prisma.${NAME}.create({
+      data: {
+        id: ${CAMEL}.id,
+        name: ${CAMEL}.name,
+        email: ${CAMEL}.email,
+      },
+    });
+    return new ${PASCAL}(saved.id, saved.name, saved.email);
+  }
+
+  async findById(id: string): Promise<${PASCAL} | null> {
+    const found = await this.prisma.${NAME}.findUnique({ where: { id } });
+    return found ? new ${PASCAL}(found.id, found.name, found.email) : null;
+  }
+}
+EOF
+
+  REPO_CLASS="${PASCAL}PrismaRepository"
+  ENTITY_IMPORT="" # pas d'import pour Prisma
+  REPO_PROVIDER="{
+      provide: '${PASCAL}RepositoryPort',
+      useClass: ${PASCAL}PrismaRepository,
+    }"
+fi
+
+# --- Module.ts ---
 cat > "$MODULE_DIR/${NAME}.module.ts" <<EOF
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { ${PASCAL}Entity } from './infrastructure/persistences/repositories/${NAME}.orm';
-import { ${PASCAL}TypeOrmRepository } from './infrastructure/persistences/repositories/${NAME}.typeorm.repository';
-import { Create${PASCAL}Handler } from './core/application/commands/create-${NAME}.handler';
 import { ${PASCAL}Controller } from './interfaces/controllers/${NAME}.controller';
+import { Create${PASCAL}Handler } from './core/application/commands/create-${NAME}.handler';
+${ORM == "typeorm" && "import { TypeOrmModule } from '@nestjs/typeorm';"}
+${ORM == "typeorm" && "import { ${PASCAL}Entity } from './infrastructure/persistences/repositories/${NAME}.orm';"}
+import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.${ORM}.repository';
 
 @Module({
-  imports: [CqrsModule, TypeOrmModule.forFeature([${PASCAL}Entity])],
+  imports: [CqrsModule${ENTITY_IMPORT:+, $ENTITY_IMPORT}],
   controllers: [${PASCAL}Controller],
   providers: [
     Create${PASCAL}Handler,
-    ${PASCAL}TypeOrmRepository,
-    {
-      provide: '${PASCAL}RepositoryPort',
-      useClass: ${PASCAL}TypeOrmRepository,
-    },
+    $REPO_CLASS,
+    $REPO_PROVIDER,
   ],
 })
 export class ${PASCAL}Module {}
 EOF
 
-# --- INJECTION DANS app.module.ts ---
-APP_MODULE_PATH="src/app.module.ts"
-MODULE_IMPORT_PATH="./app/$NAME/${NAME}.module"
-MODULE_CLASS="${PASCAL}Module"
+# --- Injection dans app.module.ts ---
+APP_MODULE="src/app.module.ts"
+IMPORT_STATEMENT="import { ${PASCAL}Module } from './app/$NAME/${NAME}.module';"
 
-if grep -q "$MODULE_CLASS" "$APP_MODULE_PATH"; then
-  echo "ℹ️  $MODULE_CLASS est déjà importé dans app.module.ts"
-else
+if ! grep -q "$IMPORT_STATEMENT" "$APP_MODULE"; then
   sed -i '' "1i\\
-import { $MODULE_CLASS } from '$MODULE_IMPORT_PATH';
-" "$APP_MODULE_PATH"
+$IMPORT_STATEMENT
+" "$APP_MODULE"
 
-  sed -i '' "s/\(imports: \[\)/\1$MODULE_CLASS, /" "$APP_MODULE_PATH"
+  sed -i '' "s/\(imports: \[\)/\1${PASCAL}Module, /" "$APP_MODULE"
 
-  echo "✅ $MODULE_CLASS ajouté à app.module.ts"
+  echo "✅ ${PASCAL}Module ajouté à app.module.ts"
+else
+  echo "ℹ️  ${PASCAL}Module déjà présent dans app.module.ts"
 fi
 
-echo "🎯 Module \"$NAME\" généré avec TypeORM, repository & injection automatique 🧙"
+echo "🎯 Module \"$NAME\" généré avec ORM=$ORM, CQRS, repository & injection 💥"

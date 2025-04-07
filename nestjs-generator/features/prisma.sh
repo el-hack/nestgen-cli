@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# ────── Charger les helpers ──────
+FEATURES_PATH="$(dirname "$0")/features"
+source "$FEATURES_PATH/utils.sh"
+source "$FEATURES_PATH/logger.sh"
+
+
 PM=$1
 APP_NAME=$2
 
