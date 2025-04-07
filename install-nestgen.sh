@@ -25,7 +25,7 @@ if [ ! -f "$PKG_FILE" ]; then
   echo "📦 package.json manquant — création automatique..."
   cat > "$PKG_FILE" <<EOF
 {
-  "name": "$PACKAGE_NAME",
+  "name": "@outis23/nestgen",
   "version": "1.0.0",
   "description": "CLI NestJS module generator",
   "bin": {
