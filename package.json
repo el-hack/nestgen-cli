@@ -5,7 +5,7 @@
   "bin": {
     "nestgen": "nestgen.js"
   },
-  "author": "Ton Nom <ton.email@example.com>",
+  "author": "Aristide kamara bakarykamara52@gmail.com",
   "license": "MIT",
   "keywords": [
     "nestjs",
@@ -18,7 +18,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/tonpseudo/nestgen-cli"
+    "url": "https://github.com/el-hack/nestgen-cli.git"
   },
   "type": "commonjs"
 }
