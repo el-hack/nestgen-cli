@@ -151,7 +151,7 @@ R: Par défaut, NestGen utilise ses templates intégrés. Leurs structures sont 
 **Q: NestGen supporte-t-il les microservices ?**  
 R: Pas encore nativement, mais c'est prévu dans les prochaines versions. En attendant, vous pouvez adapter manuellement la structure générée.
 
-<!-- ## 👥 Contribuer
+## 👥 Contribuer
 
 Les contributions sont les bienvenues ! Pour contribuer :
 
@@ -161,7 +161,7 @@ Les contributions sont les bienvenues ! Pour contribuer :
 4. Poussez vers la branche (`git push origin feature/amazing-feature`)
 5. Ouvrez une Pull Request
 
-Veuillez consulter le fichier `CONTRIBUTING.md` pour plus de détails. -->
+<!-- Veuillez consulter le fichier `CONTRIBUTING.md` pour plus de détails. -->
 
 ## 📄 Licence
 
