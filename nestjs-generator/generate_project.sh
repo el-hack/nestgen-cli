@@ -37,11 +37,6 @@ debug_log "Install command : $PM $INSTALL_CMD"
 if ! command -v nest &> /dev/null; then
   log_warn "Nest CLI non installée. Installation avec npm..."
   npm install -g @nestjs/cli
-  if ! command -v nest &> /dev/null; then
-    log_error "Nest CLI toujours indisponible après installation"
-    echo "💡 Fais : source ~/.zshrc ou redémarre ton terminal"
-    exit 1
-  fi
 fi
 
 # ────── Création du projet ──────
@@ -76,7 +71,7 @@ case "$ORM" in
     ;;
 esac
 
-# ────── Docker, Swagger, Git (ENV + fallback interactif) ──────
+# ────── Docker, Swagger, Git ──────
 WITH_DOCKER=${WITH_DOCKER:-$(read -p "🐳 Activer Docker ? (y/n) : " tmp && echo "$tmp")}
 [ "$WITH_DOCKER" = "y" ] && bash "$FEATURES_PATH/docker.sh" "$APP_NAME"
 
@@ -86,38 +81,55 @@ WITH_SWAGGER=${WITH_SWAGGER:-$(read -p "📚 Activer Swagger ? (y/n) : " tmp && 
 WITH_GIT=${WITH_GIT:-$(read -p "🔃 Initialiser Git ? (y/n) : " tmp && echo "$tmp")}
 [ "$WITH_GIT" = "y" ] && bash "$FEATURES_PATH/git.sh"
 
-# ────── Modules à générer (ENV + fallback) ──────
+# ────── Modules à générer ──────
 MODULES=${MODULES:-$(read -p "👤 Modules à générer (séparés par espaces) : " tmp && echo "$tmp")}
 for MODULE in $MODULES; do
   debug_log "Génération du module $MODULE"
   bash "$FEATURES_PATH/add_module.sh" "$MODULE" "$ORM"
 done
 
-# ────── Ajout de TypeOrmModule si besoin ──────
-if [ "$ORM" = "typeorm" ]; then
-  log_info "Ajout automatique de TypeOrmModule.forRoot dans app.module.ts"
+# ────── Injection dans app.module.ts ──────
+APP_MODULE="src/app.module.ts"
 
-  cat > src/app.module.ts <<EOF
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-
-@Module({
-  imports: [
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres',
-      password: 'postgres',
-      database: 'appdb',
-      synchronize: true,
-      autoLoadEntities: true,
-    }),
-  ],
-})
-export class AppModule {}
-EOF
+# CqrsModule
+if ! grep -q "CqrsModule" "$APP_MODULE"; then
+  sed -i '' "1i\\
+import { CqrsModule } from '@nestjs/cqrs';
+" "$APP_MODULE"
+  sed -i '' "s|imports: \[|imports: [CqrsModule, |" "$APP_MODULE"
+  echo "✅ CqrsModule injecté"
 fi
+
+# TypeOrmModule
+if [ "$ORM" = "typeorm" ]; then
+  if ! grep -q "TypeOrmModule" "$APP_MODULE"; then
+    sed -i '' "1i\\
+import { TypeOrmModule } from '@nestjs/typeorm';
+" "$APP_MODULE"
+    echo "✅ Import de TypeOrmModule ajouté"
+  fi
+
+  if ! grep -q "TypeOrmModule.forRoot" "$APP_MODULE"; then
+    sed -i '' -E 's/(imports: \[[^]]*)(])/\1\
+    TypeOrmModule.forRoot({\
+      type: '\''postgres'\'',\
+      host: '\''localhost'\'',\
+      port: 5432,\
+      username: '\''postgres'\'',\
+      password: '\''postgres'\'',\
+      database: '\''appdb'\'',\
+      synchronize: true,\
+      autoLoadEntities: true,\
+    }), \2/g' "$APP_MODULE"
+    echo "✅ TypeOrmModule.forRoot injecté"
+  fi
+fi
+
+# Modules générés
+for MODULE in $MODULES; do
+  debug_log "Injection de $MODULE dans app.module.ts"
+  bash "$FEATURES_PATH/inject_module_to_app.sh" "$MODULE" "$ORM"
+done
 
 # ────── Résumé final ──────
 echo ""

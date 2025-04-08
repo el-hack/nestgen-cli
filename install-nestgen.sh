@@ -26,7 +26,7 @@ if [ ! -f "$PKG_FILE" ]; then
   cat > "$PKG_FILE" <<EOF
 {
   "name": "@outis25/nestgen",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "CLI NestJS module generator",
   "bin": {
     "nestgen": "nestgen.js"

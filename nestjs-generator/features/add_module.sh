@@ -3,6 +3,12 @@
 RAW_NAME=$1
 ORM=$2
 
+# ────── Charger les helpers ──────
+FEATURES_PATH="$(dirname "$0")"
+source "$FEATURES_PATH/utils.sh"
+source "$FEATURES_PATH/logger.sh"
+
+
 if [ -z "$RAW_NAME" ]; then
   echo "❌ Tu dois passer un nom de module."
   exit 1
@@ -13,16 +19,19 @@ if [ -z "$ORM" ]; then
   exit 1
 fi
 
-# Formatage
+# ────── Formatage ──────
 NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
-PASCAL=$(echo "$NAME" | sed -E 's/(^|-)([a-z])/\U\2/g')
+PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\u\2/g' | sed -E 's/[-_]//g')
+
+NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
+PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\U\2/g' | sed -E 's/[-_]//g')
+
 CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
 
 MODULE_DIR="src/app/$NAME"
-
 mkdir -p "$MODULE_DIR"/{core/{application/{commands,events,queries},domain/{entities,ports}},infrastructure/{adapters,persistences/repositories},interfaces/{controllers,dtos}}
 
-# --- Entity ---
+# ────── Entity ──────
 cat > "$MODULE_DIR/core/domain/entities/${NAME}.entity.ts" <<EOF
 export class $PASCAL {
   constructor(
@@ -33,7 +42,7 @@ export class $PASCAL {
 }
 EOF
 
-# --- Port ---
+# ────── Port ──────
 cat > "$MODULE_DIR/core/domain/ports/${NAME}.repository.ts" <<EOF
 import { $PASCAL } from '../entities/${NAME}.entity';
 
@@ -43,14 +52,14 @@ export interface ${PASCAL}RepositoryPort {
 }
 EOF
 
-# --- Command ---
+# ────── Command ──────
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.command.ts" <<EOF
 export class Create${PASCAL}Command {
   constructor(public readonly name: string, public readonly email: string) {}
 }
 EOF
 
-# --- Command Handler ---
+# ────── Command Handler ──────
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.handler.ts" <<EOF
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from './create-${NAME}.command';
@@ -69,7 +78,7 @@ export class Create${PASCAL}Handler implements ICommandHandler<Create${PASCAL}Co
 }
 EOF
 
-# --- DTO ---
+# ────── DTO ──────
 cat > "$MODULE_DIR/interfaces/dtos/create-${NAME}.dto.ts" <<EOF
 import { IsEmail, IsString } from 'class-validator';
 
@@ -82,7 +91,7 @@ export class Create${PASCAL}Dto {
 }
 EOF
 
-# --- Controller ---
+# ────── Controller ──────
 cat > "$MODULE_DIR/interfaces/controllers/${NAME}.controller.ts" <<EOF
 import { Controller, Post, Body } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
@@ -103,13 +112,12 @@ export class ${PASCAL}Controller {
 }
 EOF
 
-# --- Repositories en fonction de l’ORM ---
+# ────── Repository ORM ──────
 REPO_CLASS=""
 ENTITY_IMPORT=""
 REPO_PROVIDER=""
 
 if [ "$ORM" == "typeorm" ]; then
-  # TypeORM entity
   cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.orm.ts" <<EOF
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
@@ -126,7 +134,6 @@ export class ${PASCAL}Entity {
 }
 EOF
 
-  # TypeORM Repository
   cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.typeorm.repository.ts" <<EOF
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -160,7 +167,6 @@ EOF
     }"
 
 elif [ "$ORM" == "prisma" ]; then
-  # Prisma Repository
   cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.prisma.repository.ts" <<EOF
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/prisma.service';
@@ -190,22 +196,27 @@ export class ${PASCAL}PrismaRepository implements ${PASCAL}RepositoryPort {
 EOF
 
   REPO_CLASS="${PASCAL}PrismaRepository"
-  ENTITY_IMPORT="" # pas d'import pour Prisma
+  ENTITY_IMPORT=""
   REPO_PROVIDER="{
       provide: '${PASCAL}RepositoryPort',
       useClass: ${PASCAL}PrismaRepository,
     }"
 fi
 
-# --- Module.ts ---
-cat > "$MODULE_DIR/${NAME}.module.ts" <<EOF
-import { Module } from '@nestjs/common';
+# ────── Module.ts ──────
+IMPORTS="import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { ${PASCAL}Controller } from './interfaces/controllers/${NAME}.controller';
 import { Create${PASCAL}Handler } from './core/application/commands/create-${NAME}.handler';
-${ORM == "typeorm" && "import { TypeOrmModule } from '@nestjs/typeorm';"}
-${ORM == "typeorm" && "import { ${PASCAL}Entity } from './infrastructure/persistences/repositories/${NAME}.orm';"}
-import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.${ORM}.repository';
+import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.${ORM}.repository';"
+
+if [ "$ORM" = "typeorm" ]; then
+  IMPORTS="$IMPORTS
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ${PASCAL}Entity } from './infrastructure/persistences/repositories/${NAME}.orm';"
+fi
+
+echo "$IMPORTS
 
 @Module({
   imports: [CqrsModule${ENTITY_IMPORT:+, $ENTITY_IMPORT}],
@@ -217,22 +228,7 @@ import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.
   ],
 })
 export class ${PASCAL}Module {}
-EOF
+" > "$MODULE_DIR/${NAME}.module.ts"
 
-# --- Injection dans app.module.ts ---
-APP_MODULE="src/app.module.ts"
-IMPORT_STATEMENT="import { ${PASCAL}Module } from './app/$NAME/${NAME}.module';"
+bash "$(dirname "$0")/inject_module_to_app.sh" "$NAME" "$ORM"
 
-if ! grep -q "$IMPORT_STATEMENT" "$APP_MODULE"; then
-  sed -i '' "1i\\
-$IMPORT_STATEMENT
-" "$APP_MODULE"
-
-  sed -i '' "s/\(imports: \[\)/\1${PASCAL}Module, /" "$APP_MODULE"
-
-  echo "✅ ${PASCAL}Module ajouté à app.module.ts"
-else
-  echo "ℹ️  ${PASCAL}Module déjà présent dans app.module.ts"
-fi
-
-echo "🎯 Module \"$NAME\" généré avec ORM=$ORM, CQRS, repository & injection 💥"

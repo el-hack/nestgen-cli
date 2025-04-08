@@ -19,3 +19,8 @@ assert_command_exists() {
     exit 1
   fi
 }
+
+# ────── Formatage ──────
+to_pascal_case() {
+  echo "$1" | sed -E 's/(^|-|_)([a-z])/\U\2/g'
+}
