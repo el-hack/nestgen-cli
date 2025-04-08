@@ -1,6 +1,6 @@
 {
-  "name": "pnpm",
-  "version": "0.0.2",
+  "name": "@outis25/nestgen",
+  "version": "0.0.4",
   "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
   "files": [
     "nestgen.js",
