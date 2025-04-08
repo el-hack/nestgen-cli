@@ -170,6 +170,6 @@ NestGen est distribué sous licence MIT. Voir le fichier `LICENSE` pour plus d'i
 ---
 
 <div align="center">
-  <p>Développé avec ❤️ par <a href="https://github.com/outis23">@outis23</a></p>
+  <p>Développé avec ❤️ par <a href="https://github.com/el-hack">@el-hack</a></p>
   <p>Si vous trouvez ce projet utile, n'hésitez pas à lui donner une ⭐️ sur GitHub !</p>
 </div>
