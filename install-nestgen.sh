@@ -17,7 +17,7 @@ if ! command -v pnpm &>/dev/null; then
 fi
 
 # 🧾 Étape 2 : Demander le nom du package
-read -p "📦 Quel nom veux-tu donner à ton package CLI ? (ex: @outis23/nestgen) : " PACKAGE_NAME
+read -p "📦 Quel nom veux-tu donner à ton package CLI ? (ex: @outis25/nestgen) : " PACKAGE_NAME
 PACKAGE_NAME=${PACKAGE_NAME:-"nestgen"}
 
 # 📦 Étape 3 : Créer package.json si manquant
@@ -25,7 +25,7 @@ if [ ! -f "$PKG_FILE" ]; then
   echo "📦 package.json manquant — création automatique..."
   cat > "$PKG_FILE" <<EOF
 {
-  "name": "@outis23/nestgen",
+  "name": "@outis25/nestgen",
   "version": "1.0.0",
   "description": "CLI NestJS module generator",
   "bin": {

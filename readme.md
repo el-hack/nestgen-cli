@@ -1,15 +1,15 @@
 # NestGen
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/outis23/nestgen-js/main/assets/logo.png" alt="NestGen Logo" width="200" />
+  <img src="https://raw.githubusercontent.com/outis25/nestgen-js/main/assets/logo.png" alt="NestGen Logo" width="200" />
   <h3>Générateur modulaire autonome pour projets NestJS</h3>
   <p>Architecture DDD • CQRS • Hexagonal • Prisma/TypeORM • Docker/Swagger</p>
 
-  ![npm](https://img.shields.io/npm/v/@outis23/nestgen?color=crimson&style=for-the-badge)
+  ![npm](https://img.shields.io/npm/v/@outis25/nestgen?color=crimson&style=for-the-badge)
   ![nestjs](https://img.shields.io/badge/NestJS-Scaffolded-red?style=for-the-badge&logo=nestjs)
   ![standalone](https://img.shields.io/badge/100%25-Autonome-brightgreen?style=for-the-badge)
-  ![license](https://img.shields.io/npm/l/@outis23/nestgen?color=blue&style=for-the-badge)
-  ![downloads](https://img.shields.io/npm/dm/@outis23/nestgen?color=green&style=for-the-badge)
+  ![license](https://img.shields.io/npm/l/@outis25/nestgen?color=blue&style=for-the-badge)
+  ![downloads](https://img.shields.io/npm/dm/@outis25/nestgen?color=green&style=for-the-badge)
 </div>
 
 ## 📋 Table des matières
@@ -44,7 +44,7 @@ Idéal pour les développeurs qui souhaitent maintenir une architecture propre e
 ## 📦 Installation
 
 ```bash
-npm install -g @outis23/nestgen
+npm install -g @outis25/nestgen
 ```
 
 C'est tout! Aucune configuration supplémentaire n'est nécessaire. Tous les templates et dépendances sont embarqués dans le package.
