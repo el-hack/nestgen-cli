@@ -7,11 +7,10 @@ FEATURES_PATH="$(dirname "$0")/features"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
+# ────── DEBUG MODE ──────
 DEBUG=false
 for arg in "$@"; do
-  if [[ "$arg" == "--debug" ]]; then
-    DEBUG=true
-  fi
+  [[ "$arg" == "--debug" ]] && DEBUG=true
 done
 
 debug_log() {
@@ -25,34 +24,31 @@ debug_log "Chemin du script courant : $(pwd)"
 debug_log "Features path : $FEATURES_PATH"
 
 # ────── INFOS UTILISATEUR ──────
-read -p "📛 Nom du projet : " APP_NAME
-read -p "📁 Chemin d’installation (vide = ici) : " PROJECT_PATH
-PROJECT_PATH=${PROJECT_PATH:-$(pwd)}
+APP_NAME=${APP_NAME:-$(read -p "📛 Nom du projet : " tmp && echo "$tmp")}
+PROJECT_PATH=${PROJECT_PATH:-$(read -p "📁 Chemin d’installation (vide = ici) : " tmp && echo "${tmp:-$(pwd)}")}
 FULL_PATH="$PROJECT_PATH/$APP_NAME"
-read -p "📦 Package manager (npm/yarn/pnpm) : " PM
-read -p "🧠 ORM ? (typeorm/prisma) : " ORM
+PM=${PM:-$(read -p "📦 Package manager (npm/yarn/pnpm) : " tmp && echo "$tmp")}
+ORM=${ORM:-$(read -p "🧠 ORM ? (typeorm/prisma) : " tmp && echo "$tmp")}
 
 INSTALL_CMD=$(get_install_cmd "$PM")
-debug_log "Install command pour $PM : $PM $INSTALL_CMD"
+debug_log "Install command : $PM $INSTALL_CMD"
 
-# ────── Vérifier Nest CLI ──────
+# ────── Vérification de Nest CLI ──────
 if ! command -v nest &> /dev/null; then
-  log_warn "La CLI NestJS (nest) n’est pas installée."
-  log_info "Installation via : npm install -g @nestjs/cli"
+  log_warn "Nest CLI non installée. Installation avec npm..."
   npm install -g @nestjs/cli
-
   if ! command -v nest &> /dev/null; then
-    log_error "nest CLI toujours indisponible après installation."
-    echo "💡 source ~/.zshrc ou redémarre ton terminal"
+    log_error "Nest CLI toujours indisponible après installation"
+    echo "💡 Fais : source ~/.zshrc ou redémarre ton terminal"
     exit 1
   fi
 fi
 
-# ────── Génération du projet ──────
+# ────── Création du projet ──────
 log_info "Création du projet à $FULL_PATH"
 mkdir -p "$FULL_PATH"
 cd "$FULL_PATH" || {
-  log_error "Impossible de se déplacer dans $FULL_PATH"
+  log_error "Erreur : impossible de se déplacer dans $FULL_PATH"
   exit 1
 }
 
@@ -61,10 +57,10 @@ nest new . --package-manager "$PM" --skip-git || {
   exit 1
 }
 
-log_info "Installation des packages de base..."
+log_info "Installation des packages communs..."
 $PM $INSTALL_CMD @nestjs/cqrs class-validator class-transformer @nestjs/config
 
-# ────── ORM ──────
+# ────── ORM SETUP ──────
 case "$ORM" in
   typeorm)
     debug_log "Appel de typeorm.sh"
@@ -75,31 +71,32 @@ case "$ORM" in
     bash "$FEATURES_PATH/prisma.sh" "$PM" "$APP_NAME"
     ;;
   *)
-    log_error "ORM non reconnu : $ORM"
+    log_error "❌ ORM non reconnu : $ORM"
     exit 1
     ;;
 esac
 
-# ────── Docker, Swagger, Git ──────
-read -p "🐳 Activer Docker ? (y/n) : " WITH_DOCKER
+# ────── Docker, Swagger, Git (ENV + fallback interactif) ──────
+WITH_DOCKER=${WITH_DOCKER:-$(read -p "🐳 Activer Docker ? (y/n) : " tmp && echo "$tmp")}
 [ "$WITH_DOCKER" = "y" ] && bash "$FEATURES_PATH/docker.sh" "$APP_NAME"
 
-read -p "📚 Activer Swagger ? (y/n) : " WITH_SWAGGER
+WITH_SWAGGER=${WITH_SWAGGER:-$(read -p "📚 Activer Swagger ? (y/n) : " tmp && echo "$tmp")}
 [ "$WITH_SWAGGER" = "y" ] && bash "$FEATURES_PATH/swagger.sh" "$PM"
 
-read -p "🔃 Initialiser Git ? (y/n) : " WITH_GIT
+WITH_GIT=${WITH_GIT:-$(read -p "🔃 Initialiser Git ? (y/n) : " tmp && echo "$tmp")}
 [ "$WITH_GIT" = "y" ] && bash "$FEATURES_PATH/git.sh"
 
-# ────── Modules ──────
-read -p "👤 Modules à générer (séparés par espaces) : " MODULES
+# ────── Modules à générer (ENV + fallback) ──────
+MODULES=${MODULES:-$(read -p "👤 Modules à générer (séparés par espaces) : " tmp && echo "$tmp")}
 for MODULE in $MODULES; do
   debug_log "Génération du module $MODULE"
   bash "$FEATURES_PATH/add_module.sh" "$MODULE" "$ORM"
 done
 
-# ────── TypeORM Root Config ──────
+# ────── Ajout de TypeOrmModule si besoin ──────
 if [ "$ORM" = "typeorm" ]; then
-  log_info "Ajout de TypeOrmModule.forRoot dans app.module.ts"
+  log_info "Ajout automatique de TypeOrmModule.forRoot dans app.module.ts"
+
   cat > src/app.module.ts <<EOF
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -124,10 +121,10 @@ fi
 
 # ────── Résumé final ──────
 echo ""
-log_success "Projet NestJS \"$APP_NAME\" généré avec succès 🎉"
+log_success "✅ Projet NestJS \"$APP_NAME\" généré avec succès 🎉"
 echo "📁 Localisation : $FULL_PATH"
-echo "🧠 ORM utilisé : $ORM"
 echo "📦 Package manager : $PM"
+echo "🧠 ORM : $ORM"
 [ "$WITH_DOCKER" = "y" ] && echo "🐳 Docker activé"
 [ "$WITH_SWAGGER" = "y" ] && echo "📚 Swagger activé"
 [ "$WITH_GIT" = "y" ] && echo "🔃 Git initialisé"

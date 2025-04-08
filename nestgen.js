@@ -1,108 +1,153 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { execSync } from 'child_process';
+import inquirer from 'inquirer';
+import chalk from 'chalk';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-// 📁 Chemins internes au package
-const CLI_DIR = __dirname;
-const ROOT_PATH = path.resolve(CLI_DIR, 'nestjs-generator');
-const FEATURES_PATH = path.join(ROOT_PATH, 'features');
+// ────── Resolve __dirname compatible ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// 🖼️ Logo
+// ────── Définition du chemin du générateur
+const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, './nestjs-generator');
+const GENERATE_SCRIPT = path.join(ROOT_PATH, 'generate_project.sh');
+
+// ────── Logo CLI
 function printLogo() {
-    console.log(`
+    console.log(chalk.magentaBright(`
 ███╗   ██╗███████╗███████╗████████╗ ██████╗ ███████╗███╗   ██╗
 ████╗  ██║██╔════╝██╔════╝╚══██╔══╝██╔════╝ ██╔════╝████╗  ██║
 ██╔██╗ ██║█████╗  ███████╗   ██║   ██║  ███╗█████╗  ██╔██╗ ██║
 ██║╚██╗██║██╔══╝  ╚════██║   ██║   ██║   ██║██╔══╝  ██║╚██╗██║
 ██║ ╚████║███████╗███████║   ██║   ╚██████╔╝███████╗██║ ╚████║
 ╚═╝  ╚═══╝╚══════╝╚══════╝   ╚═╝    ╚═════╝ ╚══════╝╚═╝  ╚═══╝
-                                                              
-✨ NestGen CLI — Générateur modulaire NestJS
-📦 DDD • CQRS • Hexagonal • TypeORM/Prisma • Swagger/Docker
-`);
+`));
+    console.log(chalk.cyan.bold('✨ NestGen CLI — Générateur modulaire NestJSs'));
 }
 
-// 🔍 Vérifie qu’un script existe
-function checkFile(filePath, label) {
-    if (!fs.existsSync(filePath)) {
-        console.error(`❌ ${label} introuvable : ${filePath}`);
+// ────── Questions interactives
+async function askInitQuestions() {
+    return await inquirer.prompt([
+        {
+            type: 'input',
+            name: 'projectName',
+            message: '📛 Nom du projet :',
+            default: 'my-app',
+        },
+        {
+            type: 'input',
+            name: 'projectPath',
+            message: '📁 Dossier cible :',
+            default: './',
+        },
+        {
+            type: 'list',
+            name: 'packageManager',
+            message: '📦 Package manager :',
+            choices: ['pnpm', 'yarn', 'npm'],
+            default: 'pnpm',
+        },
+        {
+            type: 'list',
+            name: 'orm',
+            message: '🧠 ORM :',
+            choices: ['typeorm', 'prisma'],
+            default: 'typeorm',
+        },
+        {
+            type: 'confirm',
+            name: 'withSwagger',
+            message: '📚 Activer Swagger ?',
+            default: true,
+        },
+        {
+            type: 'confirm',
+            name: 'withDocker',
+            message: '🐳 Activer Docker ?',
+            default: false,
+        },
+        {
+            type: 'confirm',
+            name: 'withGit',
+            message: '🔃 Initialiser Git ?',
+            default: true,
+        },
+        {
+            type: 'input',
+            name: 'modules',
+            message: '📦 Modules à générer (séparés par des espaces) :',
+            default: 'user',
+            filter: (input) => input.split(' ').map(s => s.trim()).filter(Boolean),
+        }
+    ]);
+}
+
+// ────── Exécution du init
+async function runInteractiveInit() {
+    printLogo();
+
+    if (!fs.existsSync(GENERATE_SCRIPT)) {
+        console.log(chalk.red(`❌ Script introuvable : ${GENERATE_SCRIPT}`));
         process.exit(1);
     }
-}
 
-// 🧪 Diagnostic : nestgen doctor
-function doctor() {
-    printLogo();
-    console.log("🔬 Diagnostic de l'environnement...\n");
+    const answers = await askInitQuestions();
+    const {
+        projectName,
+        projectPath,
+        packageManager,
+        orm,
+        withSwagger,
+        withDocker,
+        withGit,
+        modules,
+    } = answers;
 
-    const checks = [
-        { label: 'nestgen.js présent', ok: true },
-        { label: 'generate_project.sh', ok: fs.existsSync(path.join(ROOT_PATH, 'generate_project.sh')) },
-        { label: 'features/', ok: fs.existsSync(FEATURES_PATH) },
-        { label: 'add_module.sh', ok: fs.existsSync(path.join(FEATURES_PATH, 'add_module.sh')) },
-    ];
+    const env = {
+        APP_NAME: projectName,
+        PROJECT_PATH: path.resolve(projectPath),
+        PM: packageManager,
+        ORM: orm,
+        WITH_SWAGGER: withSwagger ? 'y' : 'n',
+        WITH_DOCKER: withDocker ? 'y' : 'n',
+        WITH_GIT: withGit ? 'y' : 'n',
+        MODULES: modules.join(' '),
+    };
 
+    const envExport = Object.entries(env)
+        .map(([key, val]) => `${key}="${val}"`)
+        .join(' ');
+
+    console.log('\n🚀 Lancement de la génération du projet...\n');
     try {
-        execSync('command -v nestgen', { stdio: 'ignore' });
-        checks.push({ label: 'commande nestgen (global)', ok: true });
-    } catch {
-        checks.push({ label: 'commande nestgen (global)', ok: false });
-    }
-
-    for (const c of checks) {
-        console.log(c.ok ? `✅ ${c.label}` : `❌ ${c.label}`);
-    }
-
-    console.log("\n🎯 Résultat :", checks.every(c => c.ok) ? "Tout est OK ✅" : "Des points sont à corriger ⚠️");
-}
-
-// 🚀 Création de projet : nestgen init
-function initProject() {
-    printLogo();
-    const script = path.join(ROOT_PATH, 'generate_project.sh');
-    checkFile(script, 'Script de génération');
-    execSync(`bash "${script}"`, { stdio: 'inherit' });
-}
-
-// ➕ Module : nestgen module user --orm=typeorm
-function generateModule(name, orm = 'typeorm') {
-    printLogo();
-
-    if (!name) {
-        console.error('❌ Tu dois fournir un nom de module.');
+        execSync(`env ${envExport} bash "${GENERATE_SCRIPT}"`, {
+            stdio: 'inherit',
+        });
+    } catch (err) {
+        console.error(chalk.red('❌ Une erreur est survenue pendant la génération.'));
         process.exit(1);
     }
-
-    const script = path.join(FEATURES_PATH, 'add_module.sh');
-    checkFile(script, 'Script add_module');
-    execSync(`bash "${script}" "${name}" "${orm}"`, { stdio: 'inherit' });
 }
 
-// 🧠 Commandes CLI
+// ────── Entrée CLI
 const args = process.argv.slice(2);
 const command = args[0];
 
 switch (command) {
     case 'init':
-        initProject();
+        await runInteractiveInit();
         break;
-    case 'module':
-        const moduleName = args[1];
-        const ormArg = args.find(a => a.startsWith('--orm='));
-        const orm = ormArg ? ormArg.split('=')[1] : 'typeorm';
-        generateModule(moduleName, orm);
-        break;
-    case 'doctor':
-        doctor();
-        break;
+
     default:
         printLogo();
-        console.log(`📘 Commandes disponibles :
-  ▸ nestgen init                          → Crée un projet NestJS complet
-  ▸ nestgen module <nom> --orm=typeorm   → Génère un module (DDD/CQRS)
-  ▸ nestgen doctor                       → Vérifie l’environnement CLI
-`);
+        console.log(chalk.gray(`
+📘 Commandes disponibles :
+  ▸ nestgen init       → Génère un projet complet NestJS (interactive)
+  ▸ nestgen module     → Bientôt interactif aussi 😏
+  ▸ nestgen doctor     → Diagnostic de l’installation CLI
+`));
         break;
 }
