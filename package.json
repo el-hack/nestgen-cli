@@ -1,6 +1,6 @@
 {
   "name": "@outis25/nestgen",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
   "files": [
     "nestgen.js",
@@ -25,6 +25,7 @@
     "url": "https://github.com/el-hack/nestgen-cli.git"
   },
   "type": "module",
+  "licenses": "MIT",
   "dependencies": {
     "chalk": "^5.3.0",
     "inquirer": "^9.0.0"
