@@ -1,6 +1,6 @@
 {
   "name": "@outis25/nestgen",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
   "files": [
     "nestgen.js",
