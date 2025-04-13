@@ -14,6 +14,7 @@ const __dirname = path.dirname(__filename);
 // ────── Définition du chemin du générateur
 const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, './nestjs-generator');
 const GENERATE_SCRIPT = path.join(ROOT_PATH, 'generate_project.sh');
+const ADD_MODULE_SCRIPT = path.join(ROOT_PATH, './features/add_module.sh');
 
 // ────── Logo CLI
 function printLogo() {
@@ -28,7 +29,19 @@ function printLogo() {
     console.log(chalk.cyan.bold('✨ NestGen CLI — Générateur modulaire NestJS'));
 }
 
-// ────── Questions interactives
+// ────── Helpers
+function isNestProject() {
+    return fs.existsSync(path.resolve('./src/app.module.ts'));
+}
+
+function parseModuleArgs(args) {
+    const moduleName = args[1];
+    const ormArg = args.find(arg => arg.startsWith('--orm='));
+    const orm = ormArg ? ormArg.split('=')[1] : 'typeorm';
+    return { moduleName, orm };
+}
+
+// ────── Commande : INIT
 async function askInitQuestions() {
     return await inquirer.prompt([
         {
@@ -85,7 +98,6 @@ async function askInitQuestions() {
     ]);
 }
 
-// ────── Exécution du init
 async function runInteractiveInit() {
     printLogo();
 
@@ -132,42 +144,47 @@ async function runInteractiveInit() {
     }
 }
 
-
-// ────── Exécution de la commande module
-async function runModuleGeneration() {
+// ────── Commande : MODULE
+async function runModuleGeneration(args) {
     printLogo();
 
-    const { moduleName, orm } = await inquirer.prompt([
-        {
-            type: 'input',
-            name: 'moduleName',
-            message: '📦 Nom du module :',
-            validate: input => !!input || 'Le nom du module est requis',
-        },
-        {
-            type: 'list',
-            name: 'orm',
-            message: '🧠 ORM utilisé :',
-            choices: ['typeorm', 'prisma'],
-            default: 'typeorm',
-        },
-    ]);
+    let moduleName, orm;
 
-    // Vérifier que le projet est un projet NestJS valide
-    const appModulePath = path.resolve('./src/app.module.ts');
-    if (!fs.existsSync(appModulePath)) {
+    if (args.length > 1) {
+        ({ moduleName, orm } = parseModuleArgs(args));
+        if (!moduleName) {
+            console.log(chalk.red('❌ Tu dois fournir un nom de module.'));
+            process.exit(1);
+        }
+    } else {
+        const answers = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'moduleName',
+                message: '📦 Nom du module :',
+                validate: input => !!input || 'Le nom du module est requis',
+            },
+            {
+                type: 'list',
+                name: 'orm',
+                message: '🧠 ORM utilisé :',
+                choices: ['typeorm', 'prisma'],
+                default: 'typeorm',
+            },
+        ]);
+        moduleName = answers.moduleName;
+        orm = answers.orm;
+    }
+
+    if (!isNestProject()) {
         console.log(chalk.red('❌ Aucun projet NestJS détecté dans ce dossier.'));
         console.log('👉 Lance cette commande depuis un projet généré avec `nestgen init`.');
         process.exit(1);
     }
 
-    // Appeler le script Bash
-    const addModuleScript = path.join(ROOT_PATH, './features/add_module.sh');
-    const envExport = `RAW_NAME="${moduleName}" ORM="${orm}"`;
-
     try {
         console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
-        execSync(`bash "${addModuleScript}" "${moduleName}" "${orm}"`, {
+        execSync(`bash "${ADD_MODULE_SCRIPT}" "${moduleName}" "${orm}"`, {
             stdio: 'inherit',
         });
     } catch (err) {
@@ -186,16 +203,16 @@ switch (command) {
         break;
 
     case 'module':
-        await runModuleGeneration();
+        await runModuleGeneration(args);
         break;
 
     default:
         printLogo();
         console.log(chalk.gray(`
 📘 Commandes disponibles :
-  ▸ nestgen init       → Génère un projet complet NestJS (interactive)
-  ▸ nestgen module     → Bientôt interactif aussi 😏
-  ▸ nestgen doctor     → Diagnostic de l’installation CLI
+  ▸ nestgen init                 → Génère un projet complet NestJS (interactive)
+  ▸ nestgen module [nom] [--orm=xxx]  → Génère un module (interactive ou CLI)
+  ▸ nestgen doctor              → Diagnostic de l’installation CLI
 `));
         break;
 }
