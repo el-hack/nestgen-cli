@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ────── Définition du chemin du générateur
-const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, './nestjs-generator');
+const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, '.');
 const GENERATE_SCRIPT = path.join(ROOT_PATH, 'generate_project.sh');
 const ADD_MODULE_SCRIPT = path.join(ROOT_PATH, './features/add_module.sh');
 
