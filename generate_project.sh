@@ -46,14 +46,15 @@ esac
 [[ "$WITH_GIT"    == "y" ]] && bash "$CLI_FEATURES/git.sh"
 
 # ─── Copier vendor du CLI vers le projet ───
-if [ -d "$CLI_ROOT/src/vendor" ]; then
+if [ -d "$CLI_ROOT/templates/src/vendor" ]; then
   log_info "📦 Copie du vendor dans le projet"
   # On est déjà cd dans $FULL_PATH
-  cp -R "$CLI_ROOT/src/vendor" "src/"
+  cp -R "$CLI_ROOT/templates/src/vendor" "src/"
   log_success "✅ Vendor copié dans src/vendor"
 else
-  log_warn "ℹ️  Aucun dossier $CLI_ROOT/src/vendor trouvé — étape ignorée"
+  log_warn "ℹ️  Aucun dossier $CLI_ROOT/templates/src/vendor trouvé — étape ignorée"
 fi
+
 
 # Génération des modules demandés (scripts DU CLI, cwd = projet)
 for MODULE in $MODULES; do

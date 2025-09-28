@@ -1,5 +1,5 @@
-import { AggregateRootBase } from '@vendor/aggregate-root.base';
-import { UUID } from '@vendor/value-objects/uuid.value-object';
+import { AggregateRootBase } from "src/vendor/aggregate-root.base";
+import { UUID } from "src/vendor/value-objects/uuid.value-object";
 
 export interface __Name__Props {
   name: string;
