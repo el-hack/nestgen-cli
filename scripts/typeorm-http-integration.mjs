@@ -87,6 +87,7 @@ try {
         route: 'catalog/products',
         table: 'catalog_products',
         fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean']),
+        profile: 'advanced',
     });
     run('docker', [
         'run',

@@ -10,6 +10,8 @@ import { inspectProject } from './nestjs-generator/features/preflight.mjs';
 import { generateModule } from './dist/engine/module-generator.js';
 import { generateResource } from './dist/engine/resource-generator.js';
 import { parseResourceFields } from './dist/engine/resource-spec.js';
+import { configFileName, defaultConfig, loadConfigIfPresent, writeConfig } from './dist/engine/project-config.js';
+import { parseArchitectureProfile } from './dist/engine/architecture-profile.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -80,12 +82,14 @@ export function parseModuleArgs(args) {
     const parsed = parseCliArgs(args);
     if (parsed.command !== 'module' || !parsed.positionals[0])
         throw new Error('La commande module requiert un nom de module.');
-    return { moduleName: validateModuleName(parsed.positionals[0]), orm: validateOrm(parsed.options.orm) };
+    return { moduleName: validateModuleName(parsed.positionals[0]), orm: validateOrm(parsed.options.orm ?? 'typeorm') };
 }
 
 export function parseCliArgs(args) {
     const options = {
-        orm: 'typeorm',
+        orm: undefined,
+        profile: undefined,
+        packageManager: undefined,
         noInteractive: false,
         quiet: false,
         verbose: false,
@@ -102,6 +106,10 @@ export function parseCliArgs(args) {
             if (!value || value.startsWith('-')) throw new Error('--orm requiert une valeur.');
             options.orm = value;
         } else if (argument.startsWith('--orm=')) options.orm = argument.slice(6);
+        else if (argument === '--profile') options.profile = args[++index];
+        else if (argument.startsWith('--profile=')) options.profile = argument.slice(10);
+        else if (argument === '--package-manager') options.packageManager = args[++index];
+        else if (argument.startsWith('--package-manager=')) options.packageManager = argument.slice(18);
         else if (argument === '--fields') options.fields = args[++index];
         else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
         else if (argument === '--route') options.route = args[++index];
@@ -276,7 +284,7 @@ async function runModuleGeneration(parsed) {
 
     if (parsed.positionals[0]) {
         moduleName = validateModuleName(parsed.positionals[0]);
-        orm = validateOrm(parsed.options.orm);
+        orm = validateOrm(parsed.options.orm ?? 'typeorm');
     } else {
         if (parsed.options.noInteractive) throw new Error('module --no-interactive requiert un nom de module.');
         const answers = await inquirer.prompt([
@@ -320,21 +328,28 @@ async function runModuleGeneration(parsed) {
 function runResourceGeneration(parsed) {
     const name = validateModuleName(parsed.positionals[0] ?? '');
     if (!parsed.options.fields) throw new Error('resource requiert --fields champ:type[,champ:type].');
+    const config = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
+    const orm = validateOrm(parsed.options.orm ?? config.orm);
+    const profile = parseArchitectureProfile(parsed.options.profile ?? config.profile);
     const fields = parseResourceFields(parsed.options.fields.split(',').filter(Boolean));
     const route = parsed.options.route ?? `${name}s`;
     const table = parsed.options.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
-        console.log(JSON.stringify({ operation: 'resource', name, route, table, fields }, null, 2));
+        console.log(JSON.stringify({ operation: 'resource', name, route, table, orm, profile, fields }, null, 2));
         return;
     }
-    generateResource(process.cwd(), { name, route, table, fields });
+    generateResource(process.cwd(), { name, route, table, fields, orm, profile });
 }
 
 function printUsage() {
     console.log(
-        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --dry-run                    Affiche le plan sans écrire`,
+        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM
+  config init|show               Gère nestgen.config.json
+  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
+  --package-manager <pm>        Définit le package manager du config init
+  --dry-run                    Affiche le plan sans écrire`,
     );
 }
 
@@ -394,6 +409,32 @@ export async function main(args = process.argv.slice(2)) {
         case 'resource':
             runResourceGeneration(parsed);
             break;
+
+        case 'config': {
+            const action = parsed.positionals[0];
+            if (action === 'show') {
+                console.log(JSON.stringify(loadConfigIfPresent(process.cwd()) ?? defaultConfig, null, 2));
+                break;
+            }
+            if (action === 'init') {
+                const config = {
+                    ...defaultConfig,
+                    orm: validateOrm(parsed.options.orm ?? defaultConfig.orm),
+                    profile: parseArchitectureProfile(parsed.options.profile),
+                    packageManager: parsed.options.packageManager ?? defaultConfig.packageManager,
+                };
+                if (!['npm', 'pnpm', 'yarn'].includes(config.packageManager))
+                    throw new Error('Package manager invalide.');
+                if (parsed.options.dryRun) {
+                    console.log(JSON.stringify({ operation: 'config-init', file: configFileName, config }, null, 2));
+                    break;
+                }
+                writeConfig(process.cwd(), config);
+                console.log(configFileName);
+                break;
+            }
+            throw new Error('config requiert init ou show.');
+        }
 
         case 'doctor':
             runDoctor();

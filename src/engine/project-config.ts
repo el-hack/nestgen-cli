@@ -13,6 +13,19 @@ export type NestGenConfig = {
 };
 export const configFileName = 'nestgen.config.json';
 
+export const defaultConfig: NestGenConfig = {
+    version: 1,
+    orm: 'typeorm',
+    profile: 'simple',
+    sourceRoot: 'src',
+    packageManager: 'npm',
+    templateVersion: 1,
+};
+
+export function loadConfigIfPresent(projectRoot: string): NestGenConfig | undefined {
+    return fs.existsSync(path.join(projectRoot, configFileName)) ? loadConfig(projectRoot) : undefined;
+}
+
 export function loadConfig(projectRoot: string): NestGenConfig {
     const filePath = path.join(projectRoot, configFileName);
     const config = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<NestGenConfig>;
