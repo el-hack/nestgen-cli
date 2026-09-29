@@ -19,6 +19,7 @@ const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
 const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
 const typeormScriptPath = path.resolve('nestjs-generator/features/typeorm.sh');
+const configureBootstrapPath = path.resolve('nestjs-generator/features/configure_bootstrap.mjs');
 const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
 const generateProjectScriptPath = path.resolve('nestjs-generator/generate_project.sh');
 const packageManagerHelpersPath = path.resolve('nestjs-generator/features/utils.sh');
@@ -368,6 +369,23 @@ test('generates TypeORM environment configuration and explicit migrations', () =
     assert.match(fs.readFileSync(path.join(fixturePath, '.env.example'), 'utf8'), /DATABASE_PASSWORD=change-me/);
 });
 
+test('generates a secure validation bootstrap and optional Swagger endpoint', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-bootstrap-'));
+    const mainPath = path.join(fixturePath, 'main.ts');
+    fs.writeFileSync(mainPath, 'placeholder\n');
+
+    for (const enabled of ['n', 'y']) {
+        const result = spawnSync(process.execPath, [configureBootstrapPath, mainPath, enabled], { encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr);
+        const main = fs.readFileSync(mainPath, 'utf8');
+        assert.match(main, /whitelist: true/);
+        assert.match(main, /forbidNonWhitelisted: true/);
+        assert.match(main, /transform: true/);
+        if (enabled === 'y') assert.match(main, /SwaggerModule\.setup\('api'/);
+        else assert.doesNotMatch(main, /SwaggerModule/);
+    }
+});
+
 test('preserves an existing TypeORM root connection during module generation', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-existing-typeorm-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
@@ -460,6 +478,9 @@ cat > src/app.module.ts <<'EOF'
 import { Module } from '@nestjs/common';
 @Module({ imports: [] })
 export class AppModule {}
+EOF
+cat > src/main.ts <<'EOF'
+export {};
 EOF
 `);
     writeExecutable(path.join(binPath, 'npm'), `#!/usr/bin/env bash
