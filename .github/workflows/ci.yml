@@ -21,6 +21,7 @@ jobs:
             - run: npm run check
             - run: npm run format:check
             - run: npm test
+            - run: npm run test:docker
             - run: npm run test:prisma
             - run: npm run test:typeorm
             - run: npm run test:package

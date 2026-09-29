@@ -39,6 +39,7 @@
         "test": "node --test",
         "test:package": "node scripts/package-smoke.mjs",
         "test:prisma": "node scripts/prisma-integration.mjs",
+        "test:docker": "node scripts/docker-config-integration.mjs",
         "test:typeorm": "node scripts/typeorm-http-integration.mjs",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },

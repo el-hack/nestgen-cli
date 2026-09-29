@@ -79,7 +79,7 @@ esac
 # ────── Docker, Swagger, Git ──────
 WITH_DOCKER=${WITH_DOCKER:-$(read -p "🐳 Activer Docker ? (y/n) : " tmp && echo "$tmp")}
 if [ "$WITH_DOCKER" = "y" ]; then
-  run_step "Configuration Docker" bash "$FEATURES_PATH/docker.sh" "$APP_NAME"
+  run_step "Configuration Docker" bash "$FEATURES_PATH/docker.sh" "$APP_NAME" "$PM"
 fi
 
 WITH_SWAGGER=${WITH_SWAGGER:-$(read -p "📚 Activer Swagger ? (y/n) : " tmp && echo "$tmp")}
