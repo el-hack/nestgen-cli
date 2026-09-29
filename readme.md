@@ -5,11 +5,11 @@
   <h3>Générateur modulaire autonome pour projets NestJS</h3>
   <p>Architecture DDD • CQRS • Hexagonal • Prisma/TypeORM • Docker/Swagger</p>
 
-  ![npm](https://img.shields.io/npm/v/@outis25/nestgen?color=crimson&style=for-the-badge)
-  ![nestjs](https://img.shields.io/badge/NestJS-Scaffolded-red?style=for-the-badge&logo=nestjs)
-  ![standalone](https://img.shields.io/badge/100%25-Autonome-brightgreen?style=for-the-badge)
-  ![license](https://img.shields.io/npm/l/@outis25/nestgen?color=blue&style=for-the-badge)
-  ![downloads](https://img.shields.io/npm/dm/@outis25/nestgen?color=green&style=for-the-badge)
+![npm](https://img.shields.io/npm/v/@outis25/nestgen?color=crimson&style=for-the-badge)
+![nestjs](https://img.shields.io/badge/NestJS-Scaffolded-red?style=for-the-badge&logo=nestjs)
+![standalone](https://img.shields.io/badge/100%25-Autonome-brightgreen?style=for-the-badge)
+![license](https://img.shields.io/npm/l/@outis25/nestgen?color=blue&style=for-the-badge)
+![downloads](https://img.shields.io/npm/dm/@outis25/nestgen?color=green&style=for-the-badge)
 </div>
 
 ## 📋 Table des matières
@@ -58,6 +58,7 @@ nestgen init
 ```
 
 Cette commande lance un assistant interactif qui vous guidera à travers les étapes de configuration :
+
 - Nom du projet
 - Répertoire d'installation
 - Sélection de l'ORM (TypeORM ou Prisma)
@@ -71,11 +72,13 @@ nestgen module <nom-du-module> [options]
 ```
 
 Options disponibles :
+
 - `--orm=<typeorm|prisma>` - Spécifie l'ORM à utiliser pour ce module
 - `--crud` - Génère les opérations CRUD de base
 - `--path=<chemin>` - Définit un chemin personnalisé pour le module
 
 Exemples :
+
 ```bash
 nestgen module user --orm=typeorm
 nestgen module transaction --orm=prisma --crud
@@ -88,6 +91,7 @@ nestgen doctor
 ```
 
 Cette commande vérifie que :
+
 - Le package est correctement installé
 - Tous les templates embarqués sont disponibles
 - Aucune dépendance n'est manquante
@@ -116,6 +120,7 @@ src/app/<module>/
 ```
 
 Cette structure facilite :
+
 - La séparation des préoccupations
 - Les tests unitaires et d'intégration
 - L'évolutivité du code
