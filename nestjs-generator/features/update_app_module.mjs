@@ -124,14 +124,17 @@ try {
 
   if (!containsToken(currentImports, 'CqrsModule')) additions.push('CqrsModule');
   if (!containsToken(currentImports, moduleClass)) additions.push(moduleClass);
-  if (orm === 'typeorm' && !/\bTypeOrmModule\.forRoot\s*\(/.test(currentImports)) {
-    additions.unshift(`TypeOrmModule.forRoot({\n      type: 'postgres',\n      host: 'localhost',\n      port: 5432,\n      username: 'postgres',\n      password: 'postgres',\n      database: 'appdb',\n      synchronize: true,\n      autoLoadEntities: true,\n    })`);
+  if (orm === 'typeorm' && !/\bTypeOrmModule\.forRoot(?:Async)?\s*\(/.test(currentImports)) {
+    additions.unshift('TypeOrmModule.forRootAsync({ useFactory: typeOrmOptions })');
   }
 
   source = appendImports(source, array, additions);
   source = addImport(source, `import { ${moduleClass} } from '${modulePath}';`);
   source = addImport(source, "import { CqrsModule } from '@nestjs/cqrs';");
-  if (orm === 'typeorm') source = addImport(source, "import { TypeOrmModule } from '@nestjs/typeorm';");
+  if (orm === 'typeorm') {
+    source = addImport(source, "import { typeOrmOptions } from './database/typeorm.config';");
+    source = addImport(source, "import { TypeOrmModule } from '@nestjs/typeorm';");
+  }
 
   fs.writeFileSync(appModulePath, source);
 } catch (error) {
