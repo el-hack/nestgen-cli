@@ -67,16 +67,37 @@ export function resolveProjectPath(value) {
 }
 
 export function parseModuleArgs(args) {
-    const moduleName = validateModuleName(args[1]);
-    const ormArg = args.find(arg => arg.startsWith('--orm='));
-    const orm = validateOrm(ormArg ? ormArg.slice('--orm='.length) : 'typeorm');
-    return { moduleName, orm };
+    const parsed = parseCliArgs(args);
+    if (parsed.command !== 'module' || !parsed.positionals[0]) throw new Error('La commande module requiert un nom de module.');
+    return { moduleName: validateModuleName(parsed.positionals[0]), orm: validateOrm(parsed.options.orm) };
 }
 
-export function runBashScript(scriptPath, args = [], env = {}) {
+export function parseCliArgs(args) {
+    const options = { orm: 'typeorm', noInteractive: false, quiet: false, verbose: false, color: true, help: false, version: false };
+    const positionals = [];
+    for (let index = 0; index < args.length; index += 1) {
+        const argument = args[index];
+        if (argument === '--orm') {
+            const value = args[++index];
+            if (!value || value.startsWith('-')) throw new Error('--orm requiert une valeur.');
+            options.orm = value;
+        } else if (argument.startsWith('--orm=')) options.orm = argument.slice(6);
+        else if (argument === '--no-interactive') options.noInteractive = true;
+        else if (argument === '--quiet') options.quiet = true;
+        else if (argument === '--verbose') options.verbose = true;
+        else if (argument === '--no-color') options.color = false;
+        else if (argument === '--help' || argument === '-h') options.help = true;
+        else if (argument === '--version' || argument === '-V') options.version = true;
+        else if (argument.startsWith('-')) throw new Error(`Option inconnue : ${argument}`);
+        else positionals.push(argument);
+    }
+    return { command: positionals.shift(), positionals, options };
+}
+
+export function runBashScript(scriptPath, args = [], env = {}, quiet = false) {
     const result = spawnSync('bash', [scriptPath, ...args], {
         env: { ...process.env, ...env },
-        stdio: 'inherit',
+        stdio: quiet ? 'pipe' : 'inherit',
     });
 
     if (result.error) {
@@ -159,8 +180,9 @@ function validatePromptValue(validator) {
     };
 }
 
-async function runInteractiveInit() {
-    printLogo();
+async function runInteractiveInit(options) {
+    if (!options.quiet) printLogo();
+    if (options.noInteractive) throw new Error('init --no-interactive requiert des options de projet qui ne sont pas encore prises en charge.');
 
     if (!fs.existsSync(GENERATE_SCRIPT)) {
         throw new Error(`Script introuvable : ${GENERATE_SCRIPT}`);
@@ -194,14 +216,16 @@ async function runInteractiveInit() {
 }
 
 // ────── Commande : MODULE
-async function runModuleGeneration(args) {
-    printLogo();
+async function runModuleGeneration(parsed) {
+    if (!parsed.options.quiet) printLogo();
 
     let moduleName, orm;
 
-    if (args.length > 1) {
-        ({ moduleName, orm } = parseModuleArgs(args));
+    if (parsed.positionals[0]) {
+        moduleName = validateModuleName(parsed.positionals[0]);
+        orm = validateOrm(parsed.options.orm);
     } else {
+        if (parsed.options.noInteractive) throw new Error('module --no-interactive requiert un nom de module.');
         const answers = await inquirer.prompt([
             {
                 type: 'input',
@@ -225,31 +249,49 @@ async function runModuleGeneration(args) {
         throw new Error('Aucun projet NestJS détecté dans ce dossier. Lance cette commande depuis un projet NestJS.');
     }
 
-    console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
-    runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm]);
+    if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
+    runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], { NESTGEN_VERBOSE: parsed.options.verbose ? '1' : '0' }, parsed.options.quiet);
+}
+
+function printUsage() {
+    console.log(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs`);
+}
+
+function runDoctor() {
+    const valid = fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT);
+    console.log(valid ? 'NestGen est prêt.' : 'NestGen est incomplet.');
+    if (!valid) throw new Error('Des scripts de génération sont introuvables.');
 }
 
 // ────── Entrée CLI
 export async function main(args = process.argv.slice(2)) {
-    const command = args[0];
+    const parsed = parseCliArgs(args);
+    if (!parsed.options.color) chalk.level = 0;
+    if (parsed.options.version) {
+        const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+        console.log(packageJson.version);
+        return;
+    }
+    if (parsed.options.help || !parsed.command) {
+        printUsage();
+        return;
+    }
 
-    switch (command) {
+    switch (parsed.command) {
         case 'init':
-            await runInteractiveInit();
+            await runInteractiveInit(parsed.options);
             break;
 
         case 'module':
-            await runModuleGeneration(args);
+            await runModuleGeneration(parsed);
+            break;
+
+        case 'doctor':
+            runDoctor();
             break;
 
         default:
-            printLogo();
-            console.log(chalk.gray(`
-📘 Commandes disponibles :
-  ▸ nestgen init                 → Génère un projet complet NestJS (interactive)
-  ▸ nestgen module [nom] [--orm=xxx]  → Génère un module (interactive ou CLI)
-  ▸ nestgen doctor              → Diagnostic de l’installation CLI
-`));
+            throw new Error(`Commande inconnue : ${parsed.command}. Utilise --help.`);
     }
 }
 
