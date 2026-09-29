@@ -64,6 +64,28 @@ function updateAppModule(source: string, moduleClass: string, moduleImport: stri
     return `${updated.slice(0, index)}${separator}${moduleClass}${updated.slice(index)}`;
 }
 
+function updatePrismaSchema(source: string, resource: Resource): string {
+    const modelPattern = new RegExp(`\\bmodel\\s+${resource.pascal}\\b`);
+    if (modelPattern.test(source)) throw new Error(`Le modèle Prisma ${resource.pascal} existe déjà.`);
+    return `${source.trimEnd()}\n\nmodel ${resource.pascal} {\n  id    String @id @default(uuid())\n  name  String\n  email String @unique\n\n  @@map("${resource.table}")\n}\n`;
+}
+
+function ensurePrismaRuntime(projectRoot: string): void {
+    const prismaDirectory = path.join(projectRoot, 'src', 'prisma');
+    const servicePath = path.join(prismaDirectory, 'prisma.service.ts');
+    const modulePath = path.join(prismaDirectory, 'prisma.module.ts');
+    if (fs.existsSync(servicePath) || fs.existsSync(modulePath)) return;
+    fs.mkdirSync(prismaDirectory, { recursive: true });
+    fs.writeFileSync(
+        servicePath,
+        "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n",
+    );
+    fs.writeFileSync(
+        modulePath,
+        "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
+    );
+}
+
 function files(resource: Resource, orm: Orm): Map<string, string> {
     const token = `${resource.pascal}RepositoryToken`;
     const result = new Map<string, string>();
@@ -107,11 +129,11 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
     } else {
         result.set(
             `infrastructure/persistences/repositories/${resource.name}.prisma.repository.ts`,
-            `import { Injectable } from '@nestjs/common';\nimport { PrismaService } from '@/prisma.service';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository';\n@Injectable() export class ${resource.pascal}PrismaRepository implements ${resource.pascal}RepositoryPort { constructor(private readonly prisma: PrismaService) {} async save(value: ${resource.pascal}) { const saved = await this.prisma.${resource.camel}.create({ data: { id: value.id, name: value.name, email: value.email } }); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.prisma.${resource.camel}.findUnique({ where: { id } }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
+            `import { Injectable } from '@nestjs/common';\nimport { PrismaService } from '../../../../../prisma/prisma.service';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository';\n@Injectable() export class ${resource.pascal}PrismaRepository implements ${resource.pascal}RepositoryPort { constructor(private readonly prisma: PrismaService) {} async save(value: ${resource.pascal}) { const saved = await this.prisma.${resource.camel}.create({ data: { name: value.name, email: value.email } }); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.prisma.${resource.camel}.findUnique({ where: { id } }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
         );
         result.set(
             `${resource.name}.module.ts`,
-            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository';\nimport { ${resource.pascal}PrismaRepository } from './infrastructure/persistences/repositories/${resource.name}.prisma.repository';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller';\n@Module({ imports: [CqrsModule], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}PrismaRepository }] }) export class ${resource.pascal}Module {}\n`,
+            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { PrismaModule } from '../../prisma/prisma.module';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository';\nimport { ${resource.pascal}PrismaRepository } from './infrastructure/persistences/repositories/${resource.name}.prisma.repository';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller';\n@Module({ imports: [CqrsModule, PrismaModule], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}PrismaRepository }] }) export class ${resource.pascal}Module {}\n`,
         );
     }
     return result;
@@ -125,8 +147,11 @@ export function generateModule(projectRoot: string, rawName: string, orm: Orm): 
     const moduleDirectory = path.join(projectRoot, 'src/app', resource.name);
     const stage = path.join(projectRoot, `.nestgen-stage-${crypto.randomUUID()}`);
     const appModule = path.join(projectRoot, 'src/app.module.ts');
+    const prismaSchema = path.join(projectRoot, 'prisma/schema.prisma');
     if (fs.existsSync(pending)) throw new Error(`Transaction interrompue détectée : ${stateFile}.`);
     if (fs.existsSync(moduleDirectory)) throw new Error(`Le module ${resource.name} existe déjà.`);
+    const originalAppModule = fs.readFileSync(appModule, 'utf8');
+    const originalSchema = orm === 'prisma' ? fs.readFileSync(prismaSchema, 'utf8') : undefined;
     const state = { status: 'prepared', stage, moduleDirectory, appModule };
     try {
         for (const [relative, content] of files(resource, orm)) {
@@ -135,7 +160,7 @@ export function generateModule(projectRoot: string, rawName: string, orm: Orm): 
             fs.writeFileSync(target, content);
         }
         const updated = updateAppModule(
-            fs.readFileSync(appModule, 'utf8'),
+            originalAppModule,
             `${resource.pascal}Module`,
             `./app/${resource.name}/${resource.name}.module`,
         );
@@ -147,9 +172,15 @@ export function generateModule(projectRoot: string, rawName: string, orm: Orm): 
         const temporary = `${appModule}.nestgen-${process.pid}`;
         fs.writeFileSync(temporary, updated);
         fs.renameSync(temporary, appModule);
+        if (originalSchema) {
+            fs.writeFileSync(prismaSchema, updatePrismaSchema(originalSchema, resource));
+            ensurePrismaRuntime(projectRoot);
+        }
         fs.rmSync(pending);
     } catch (error) {
         if (state.status === 'module-applied') fs.rmSync(moduleDirectory, { recursive: true, force: true });
+        if (state.status === 'module-applied') fs.writeFileSync(appModule, originalAppModule);
+        if (originalSchema) fs.writeFileSync(prismaSchema, originalSchema);
         throw error;
     } finally {
         fs.rmSync(stage, { recursive: true, force: true });
