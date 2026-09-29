@@ -25,6 +25,9 @@
     "url": "https://github.com/el-hack/nestgen-cli.git"
   },
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "licenses": "MIT",
   "dependencies": {
     "chalk": "^5.3.0",
