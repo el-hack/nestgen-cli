@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 echo ""
 echo "🚀 INSTALLATION + CONFIGURATION DU CLI NESTGEN ⚙️"
@@ -9,6 +11,17 @@ CLI_DIR=$(pwd)
 BIN_FILE="nestgen.js"
 PKG_FILE="package.json"
 PNPM_BIN=$(pnpm bin -g)
+
+update_package_json() {
+  node --input-type=module -e '
+    import fs from "node:fs";
+    const [filePath, packageName] = process.argv.slice(1);
+    const packageJson = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    packageJson.name = packageName;
+    delete packageJson.packageManager;
+    fs.writeFileSync(filePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  ' "$PKG_FILE" "$PACKAGE_NAME"
+}
 
 # 🧠 Étape 1 : Vérifier pnpm
 if ! command -v pnpm &>/dev/null; then
@@ -37,9 +50,10 @@ if [ ! -f "$PKG_FILE" ]; then
 EOF
 else
   echo "✅ package.json détecté"
-  echo "🔧 Mise à jour du nom dans package.json..."
-  sed -i '' "s/\"name\": \".*\"/\"name\": \"$PACKAGE_NAME\"/" "$PKG_FILE"
 fi
+
+echo "🔧 Mise à jour portable de package.json..."
+update_package_json
 
 # ✅ Étape 4 : Vérif fichier binaire
 if [ ! -f "$BIN_FILE" ]; then
@@ -56,9 +70,6 @@ echo "✅ Binaire exécutable"
 # 🔗 Étape 6 : Lien global via pnpm
 pnpm unlink --global >/dev/null 2>&1
 pnpm link --global
-
-# 🧼 Étape 7 : Clean packageManager si tu veux un fichier clean
-sed -i '' '/"packageManager":/d' "$PKG_FILE"
 
 # ✅ Étape 8 : Vérif dans $PATH
 SHELL_RC="$HOME/.zshrc"

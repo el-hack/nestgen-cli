@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-RAW_NAME=$1
-ORM=$2
+RAW_NAME=${1:-}
+ORM=${2:-}
 
 # ────── Charger les helpers ──────
 FEATURES_PATH="$(dirname "$0")"
@@ -21,14 +21,28 @@ if [[ "$ORM" != "typeorm" && "$ORM" != "prisma" ]]; then
   exit 1
 fi
 
-# ────── Formatage ──────
-NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
-PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\u\2/g' | sed -E 's/[-_]//g')
+# ────── Formatage portable ──────
+if ! RESOURCE_DATA=$(node "$FEATURES_PATH/resource_name.mjs" "$RAW_NAME"); then
+  log_error "Impossible de normaliser le nom de la ressource."
+  exit 1
+fi
 
-NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
-PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\U\2/g' | sed -E 's/[-_]//g')
+while IFS='=' read -r key value; do
+  case "$key" in
+    NAME) NAME=$value ;;
+    PASCAL) PASCAL=$value ;;
+    CAMEL) CAMEL=$value ;;
+    PLURAL) PLURAL=$value ;;
+    ROUTE) ROUTE=$value ;;
+    TABLE) TABLE=$value ;;
+  esac
+done <<< "$RESOURCE_DATA"
 
-CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
+if [[ -z "${NAME:-}" || -z "${PASCAL:-}" || -z "${CAMEL:-}" || -z "${ROUTE:-}" || -z "${TABLE:-}" ]]; then
+  log_error "Impossible de normaliser le nom de la ressource."
+  exit 1
+fi
+
 REPOSITORY_TOKEN="${PASCAL}RepositoryToken"
 
 PROJECT_ROOT="$(pwd -P)"
@@ -121,7 +135,7 @@ import { CommandBus } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from '../../core/application/commands/create-${NAME}.command';
 import { Create${PASCAL}Dto } from '../dtos/create-${NAME}.dto';
 
-@Controller('${NAME}s')
+@Controller('${ROUTE}')
 export class ${PASCAL}Controller {
   constructor(private readonly commandBus: CommandBus) {}
 
@@ -144,7 +158,7 @@ if [ "$ORM" == "typeorm" ]; then
   cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.orm.ts" <<EOF
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity('${NAME}s')
+@Entity('${TABLE}')
 export class ${PASCAL}Entity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
