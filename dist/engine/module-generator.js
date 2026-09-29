@@ -22,7 +22,7 @@ function describe(rawName) {
         table: `${name.replaceAll('-', '_')}s`,
     };
 }
-function updateAppModule(source, moduleClass, moduleImport) {
+function updateAppModule(source, moduleClass, moduleImport, moduleReference = moduleClass) {
     const file = ts.createSourceFile('app.module.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     const appModule = file.statements.find((statement) => ts.isClassDeclaration(statement) && statement.name?.text === 'AppModule');
     const decorator = appModule &&
@@ -38,14 +38,20 @@ function updateAppModule(source, moduleClass, moduleImport) {
     const imports = decorator.expression.arguments[0].properties.find((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === 'imports');
     if (!imports || !ts.isArrayLiteralExpression(imports.initializer))
         throw new Error('AppModule doit définir imports: [] pour enregistrer un module.');
-    if (imports.initializer.elements.some((element) => element.getText(file) === moduleClass))
+    if (imports.initializer.elements.some((element) => element.getText(file) === moduleReference))
         return source;
     const importLine = `import { ${moduleClass} } from '${moduleImport}';\n`;
     const prefix = source.includes(`from '${moduleImport}'`) ? '' : importLine;
     const index = imports.initializer.getEnd() - 1 + prefix.length;
-    const separator = imports.initializer.elements.length ? ', ' : '';
+    const lastElement = imports.initializer.elements.at(-1);
+    const tail = lastElement ? source.slice(lastElement.end, imports.initializer.getEnd() - 1) : '';
+    const separator = lastElement && !tail.includes(',') ? ', ' : '';
     const updated = `${prefix}${source}`;
-    return `${updated.slice(0, index)}${separator}${moduleClass}${updated.slice(index)}`;
+    return `${updated.slice(0, index)}${separator}${moduleReference}${updated.slice(index)}`;
+}
+/** Registers a generated feature in the project's root Nest module. */
+export function registerModuleInAppModule(source, moduleClass, moduleImport, moduleReference = moduleClass) {
+    return updateAppModule(source, moduleClass, moduleImport, moduleReference);
 }
 function updatePrismaSchema(source, resource) {
     const modelPattern = new RegExp(`\\bmodel\\s+${resource.pascal}\\b`);

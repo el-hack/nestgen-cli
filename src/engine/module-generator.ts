@@ -27,7 +27,12 @@ function describe(rawName: string): Resource {
     };
 }
 
-function updateAppModule(source: string, moduleClass: string, moduleImport: string): string {
+function updateAppModule(
+    source: string,
+    moduleClass: string,
+    moduleImport: string,
+    moduleReference = moduleClass,
+): string {
     const file = ts.createSourceFile('app.module.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     const appModule = file.statements.find(
         (statement): statement is ts.ClassDeclaration =>
@@ -55,13 +60,25 @@ function updateAppModule(source: string, moduleClass: string, moduleImport: stri
     );
     if (!imports || !ts.isArrayLiteralExpression(imports.initializer))
         throw new Error('AppModule doit définir imports: [] pour enregistrer un module.');
-    if (imports.initializer.elements.some((element) => element.getText(file) === moduleClass)) return source;
+    if (imports.initializer.elements.some((element) => element.getText(file) === moduleReference)) return source;
     const importLine = `import { ${moduleClass} } from '${moduleImport}';\n`;
     const prefix = source.includes(`from '${moduleImport}'`) ? '' : importLine;
     const index = imports.initializer.getEnd() - 1 + prefix.length;
-    const separator = imports.initializer.elements.length ? ', ' : '';
+    const lastElement = imports.initializer.elements.at(-1);
+    const tail = lastElement ? source.slice(lastElement.end, imports.initializer.getEnd() - 1) : '';
+    const separator = lastElement && !tail.includes(',') ? ', ' : '';
     const updated = `${prefix}${source}`;
-    return `${updated.slice(0, index)}${separator}${moduleClass}${updated.slice(index)}`;
+    return `${updated.slice(0, index)}${separator}${moduleReference}${updated.slice(index)}`;
+}
+
+/** Registers a generated feature in the project's root Nest module. */
+export function registerModuleInAppModule(
+    source: string,
+    moduleClass: string,
+    moduleImport: string,
+    moduleReference = moduleClass,
+): string {
+    return updateAppModule(source, moduleClass, moduleImport, moduleReference);
 }
 
 function updatePrismaSchema(source: string, resource: Resource): string {

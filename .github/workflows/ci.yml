@@ -22,4 +22,5 @@ jobs:
             - run: npm run format:check
             - run: npm test
             - run: npm run test:prisma
+            - run: npm run test:typeorm
             - run: npm run test:package
