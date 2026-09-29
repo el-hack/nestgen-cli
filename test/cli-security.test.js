@@ -418,6 +418,10 @@ test('preserves an existing environment file when Docker is requested', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.readFileSync(environmentPath, 'utf8'), 'CUSTOM_VALUE=preserve-me\n');
+    assert.match(fs.readFileSync(path.join(fixturePath, 'Dockerfile'), 'utf8'), /FROM node:24-alpine AS production/);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'Dockerfile'), 'utf8'), /npm ci --omit=dev/);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'compose.yaml'), 'utf8'), /condition: service_healthy/);
+    assert.equal(fs.existsSync(path.join(fixturePath, '.dockerignore')), true);
 });
 
 test('refuses Docker file collisions and source symlinks without changing their targets', () => {
