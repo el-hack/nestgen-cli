@@ -1,180 +1,118 @@
-# NestGen
+# NestGen CLI
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/outis25/nestgen-js/main/assets/logo.png" alt="NestGen Logo" width="200" />
-  <h3>Générateur modulaire autonome pour projets NestJS</h3>
-  <p>Architecture DDD • CQRS • Hexagonal • Prisma/TypeORM • Docker/Swagger</p>
+[![npm](https://img.shields.io/npm/v/nestgen-cli?label=npm)](https://www.npmjs.com/package/nestgen-cli)
+[![CI](https://github.com/el-hack/nestgen-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/el-hack/nestgen-cli/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/nestgen-cli)](LICENSE)
 
-![npm](https://img.shields.io/npm/v/@outis25/nestgen?color=crimson&style=for-the-badge)
-![nestjs](https://img.shields.io/badge/NestJS-Scaffolded-red?style=for-the-badge&logo=nestjs)
-![standalone](https://img.shields.io/badge/100%25-Autonome-brightgreen?style=for-the-badge)
-![license](https://img.shields.io/npm/l/@outis25/nestgen?color=blue&style=for-the-badge)
-![downloads](https://img.shields.io/npm/dm/@outis25/nestgen?color=green&style=for-the-badge)
-</div>
+NestGen CLI generates NestJS project scaffolding and TypeORM resources. The canonical package is [`nestgen-cli`](https://www.npmjs.com/package/nestgen-cli); the canonical repository is [`el-hack/nestgen-cli`](https://github.com/el-hack/nestgen-cli).
 
-## 📋 Table des matières
+## Supported contract
 
-- [Introduction](#-introduction)
-- [Fonctionnalités](#-fonctionnalités)
-- [Installation](#-installation)
-- [Guide d'utilisation](#-guide-dutilisation)
-- [Architecture générée](#-architecture-générée)
-- [Roadmap](#-roadmap)
-- [FAQ](#-faq)
-- [Contribuer](#-contribuer)
-- [Licence](#-licence)
+- Node.js `>=24.15.0 <27`, npm 11, pnpm or Yarn.
+- `init` creates a NestJS project interactively with TypeORM or Prisma.
+- `module <name>` adds the advanced module layout for TypeORM or Prisma.
+- `resource <name>` currently generates a **TypeORM** REST CRUD: entity, DTOs, repository, controller, validation, pagination, `404` and unique-constraint `409`.
+- `doctor`, `--dry-run`, `--help`, `--version`, `--no-interactive` and `--quiet` are scriptable CLI features.
 
-## 🚀 Introduction
+The repository CI validates linting, formatting, generator contracts, a Prisma integration, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, and the npm tarball. It does not publish releases or deploy applications.
 
-**NestGen** est un générateur de code 100% autonome pour NestJS qui vous permet de créer rapidement des projets et des modules respectant les principes d'architecture avancés. Ce package n'a aucune dépendance externe et embarque tous les templates nécessaires pour générer des applications NestJS suivant les modèles Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS) et l'architecture hexagonale.
+## Quickstart — TypeORM resource
 
-Idéal pour les développeurs qui souhaitent maintenir une architecture propre et évolutive, NestGen accélère la phase de setup et garantit la cohérence structurelle de votre application, le tout sans nécessiter d'installation ou de configuration supplémentaire.
-
-## ✨ Fonctionnalités
-
-- **100% autonome** - Aucune dépendance externe, tout est intégré
-- **Zéro configuration** - Fonctionne immédiatement après installation
-- **Génération complète** - Projets et modules prêts à l'emploi en quelques secondes
-- **Architecture avancée** - Support intégré pour DDD, CQRS et architecture hexagonale
-- **Templates embarqués** - Tous les templates sont inclus dans le package
-- **Support multiple d'ORM** - TypeORM et Prisma intégrés nativement
-- **DevOps ready** - Configurations Docker, Swagger et CI/CD incluses
-- **Mode interactif** - Interface CLI intuitive avec prompts pour une configuration guidée
-
-## 📦 Installation
+The following flow is the supported end-to-end TypeORM path. It uses Docker for PostgreSQL and creates an explicit migration.
 
 ```bash
-npm install -g @outis25/nestgen
-```
-
-C'est tout! Aucune configuration supplémentaire n'est nécessaire. Tous les templates et dépendances sont embarqués dans le package.
-
-## 🔧 Guide d'utilisation
-
-### Initialiser un nouveau projet
-
-```bash
+npm install --global nestgen-cli
+nestgen --version
 nestgen init
 ```
 
-Cette commande lance un assistant interactif qui vous guidera à travers les étapes de configuration :
-
-- Nom du projet
-- Répertoire d'installation
-- Sélection de l'ORM (TypeORM ou Prisma)
-- Modules à générer automatiquement
-- Options additionnelles (Git, Swagger, Docker, etc.)
-
-### Générer un nouveau module
+In the interactive prompts, choose `npm`, `typeorm`, Docker enabled, then name the project `store-api`. Continue in the generated project:
 
 ```bash
-nestgen module <nom-du-module> [options]
+cd store-api
+nestgen doctor
+nestgen resource product \
+  --orm typeorm \
+  --fields sku:string!,price:number,published:boolean \
+  --route catalog/products \
+  --table catalog_products
+
+cp .env.example .env
+docker compose up --detach postgres
+npx typeorm-ts-node-commonjs migration:generate \
+  src/database/migrations/CreateProducts \
+  --dataSource src/database/data-source.ts
+npx typeorm-ts-node-commonjs migration:run \
+  --dataSource src/database/data-source.ts
+npm run start:dev
 ```
 
-Options disponibles :
-
-- `--orm=<typeorm|prisma>` - Spécifie l'ORM à utiliser pour ce module
-- `--crud` - Génère les opérations CRUD de base
-- `--path=<chemin>` - Définit un chemin personnalisé pour le module
-
-Exemples :
+In another terminal, verify the generated endpoint:
 
 ```bash
-nestgen module user --orm=typeorm
-nestgen module transaction --orm=prisma --crud
+curl --request POST http://localhost:3000/catalog/products \
+  --header 'content-type: application/json' \
+  --data '{"sku":"sku-001","price":19.9,"published":true}'
+
+curl 'http://localhost:3000/catalog/products?page=1&limit=20'
 ```
 
-### Vérifier l'installation
+A duplicate `sku` returns HTTP `409`; a malformed `price` returns HTTP `400`; an unknown identifier returns HTTP `404`. Run the generated project tests with `npm test` and stop the local database with `docker compose down`.
 
-```bash
+### English quickstart
+
+Install `nestgen-cli`, run `nestgen init`, choose **npm**, **typeorm** and Docker, then run the same commands above. `resource product --fields sku:string!,price:number,published:boolean` creates the TypeORM CRUD. Start PostgreSQL with `docker compose up -d postgres`, generate and run the migration through `typeorm-ts-node-commonjs`, start NestJS, then use the two `curl` commands to verify create and list operations.
+
+## Commands
+
+```text
+nestgen init
+nestgen module <name> [--orm typeorm|prisma] [--dry-run]
+nestgen resource <name> --fields name:type[,name:type] [--route route] [--table table]
 nestgen doctor
 ```
 
-Cette commande vérifie que :
+Fields accepted by `resource` are `string`, `number`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field:
 
-- Le package est correctement installé
-- Tous les templates embarqués sont disponibles
-- Aucune dépendance n'est manquante
-
-## 📁 Architecture générée
-
-NestGen génère une structure de projet suivant les meilleures pratiques d'architecture :
-
-```
-src/app/<module>/
-├── core/                   # Cœur du domaine métier
-│   ├── application/        # Cas d'utilisation
-│   │   ├── commands/       # Commandes CQRS
-│   │   ├── events/         # Événements domaine
-│   │   └── queries/        # Requêtes CQRS
-│   └── domain/             # Modèle du domaine
-│       ├── entities/       # Entités métier
-│       └── ports/          # Interfaces pour l'hexagonal
-├── infrastructure/         # Implémentations techniques
-│   ├── adapters/           # Adaptateurs pour l'hexagonal
-│   └── persistences/       # Couche de persistance
-│       └── repositories/   # Implémentations des repos
-└── interfaces/             # Points d'entrée de l'app
-    ├── controllers/        # Contrôleurs REST
-    └── dtos/               # Objets de transfert
+```bash
+nestgen resource invoice \
+  --fields number:string!,amount:number,paid:boolean,dueAt:date? \
+  --route billing/invoices \
+  --table billing_invoices
 ```
 
-Cette structure facilite :
+Use `nestgen --help` for the complete accepted option set. Do not rely on undocumented options such as `--crud` or `--path`.
 
-- La séparation des préoccupations
-- Les tests unitaires et d'intégration
-- L'évolutivité du code
-- Le remplacement des composants techniques
+## Docker generated by `init`
 
-## 🔮 Roadmap
+When Docker is enabled, NestGen writes:
 
-- ✅ Génération de projet complet
-- ✅ Génération de module modulaire (DDD, CQRS, Repo)
-- ✅ Support Prisma et TypeORM
-- ✅ Mode interactif
-- ✅ Docker, Swagger, Git
-- ✅ Templates intégrés
-- ✅ Package 100% autonome
-- ⬜ `nestgen resource <name>` (CRUD complet)
-- ⬜ `nestgen destroy module <name>`
-- ⬜ `nestgen preset ecommerce` (Templates d'applications)
-- ⬜ `nestgen --interactive` (menu CLI avancé)
-- ⬜ Support pour MongoDB et Mongoose
-- ⬜ Génération de tests unitaires et d'intégration
+- `compose.yaml` for local development, with PostgreSQL 16, a healthcheck and a code mount;
+- `Dockerfile` with a `development` target and a separate minimal `production` target;
+- `.dockerignore` and `.env.example` without overwriting existing environment examples.
 
-## ❓ FAQ
+Use development with `docker compose up`. Build the deployable image independently:
 
-**Q: NestGen nécessite-t-il des dépendances externes ?**  
-R: Non, NestGen est 100% autonome. Tous les templates et outils nécessaires sont embarqués dans le package.
+```bash
+docker build --target production --tag store-api:local .
+docker run --rm --env-file .env --publish 3000:3000 store-api:local
+```
 
-**Q: Puis-je utiliser NestGen avec un projet NestJS existant ?**  
-R: Oui, vous pouvez ajouter des modules générés par NestGen à un projet existant. La structure générée s'intègre parfaitement aux projets NestJS standards.
+## Development
 
-**Q: Comment puis-je personnaliser les templates générés ?**  
-R: Par défaut, NestGen utilise ses templates intégrés. Leurs structures sont optimisées pour les meilleures pratiques et ne nécessitent généralement pas de modifications.
+```bash
+npm ci
+npm run check
+npm run format:check
+npm test
+npm run test:docker
+npm run test:prisma
+npm run test:typeorm
+npm run test:package
+```
 
-**Q: NestGen supporte-t-il les microservices ?**  
-R: Pas encore nativement, mais c'est prévu dans les prochaines versions. En attendant, vous pouvez adapter manuellement la structure générée.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for supported versions and [ARCHITECTURE.md](ARCHITECTURE.md) for generator design decisions.
 
-## 👥 Contribuer
+## Licence
 
-Les contributions sont les bienvenues ! Pour contribuer :
-
-1. Forkez le dépôt
-2. Créez une branche pour votre fonctionnalité (`git checkout -b feature/amazing-feature`)
-3. Commitez vos changements (`git commit -m 'feat: add amazing feature'`)
-4. Poussez vers la branche (`git push origin feature/amazing-feature`)
-5. Ouvrez une Pull Request
-
-<!-- Veuillez consulter le fichier `CONTRIBUTING.md` pour plus de détails. -->
-
-## 📄 Licence
-
-NestGen est distribué sous licence MIT. Voir le fichier `LICENSE` pour plus d'informations.
-
----
-
-<div align="center">
-  <p>Développé avec ❤️ par <a href="https://github.com/el-hack">@el-hack</a></p>
-  <p>Si vous trouvez ce projet utile, n'hésitez pas à lui donner une ⭐️ sur GitHub !</p>
-</div>
+MIT. See [LICENSE](LICENSE).
