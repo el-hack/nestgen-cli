@@ -119,6 +119,16 @@ test('reports unsupported Nest project structures before generation', () => {
     assert.throws(() => inspectProject(fixturePath, 'typeorm'), /workspaces Nest/);
 });
 
+test('does not create a module directory when preflight fails', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-preflight-no-write-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(fixturePath, 'src', 'app.module.ts'), "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n");
+
+    const result = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], { cwd: fixturePath, encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice')), false);
+});
+
 test('maps package manager operations without a global Nest CLI', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-package-manager-'));
     const binPath = path.join(fixturePath, 'bin');
