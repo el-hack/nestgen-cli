@@ -197,6 +197,42 @@ test('generates a module through the TypeScript engine and structurally register
     assert.equal(fs.existsSync(path.join(fixturePath, '.nestgen-transaction.json')), false);
 });
 
+test('generates a Prisma model and uses the generated Prisma runtime without aliases', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-engine-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(fixturePath, 'prisma'), { recursive: true });
+    writeNestManifest(fixturePath);
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    fs.writeFileSync(
+        path.join(fixturePath, 'prisma', 'schema.prisma'),
+        'generator client { provider = "prisma-client-js" }\n\ndatasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+
+    generateModule(fixturePath, 'invoice', 'prisma');
+
+    const schema = fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8');
+    const repository = fs.readFileSync(
+        path.join(
+            fixturePath,
+            'src',
+            'app',
+            'invoice',
+            'infrastructure',
+            'persistences',
+            'repositories',
+            'invoice.prisma.repository.ts',
+        ),
+        'utf8',
+    );
+    assert.match(schema, /model Invoice/);
+    assert.match(schema, /@@map\("invoices"\)/);
+    assert.match(repository, /\.\.\/\.\.\/\.\.\/\.\.\/prisma\/prisma\.service/);
+    assert.doesNotMatch(repository, /@\/prisma/);
+});
+
 test('maps package manager operations without a global Nest CLI', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-package-manager-'));
     const binPath = path.join(fixturePath, 'bin');
