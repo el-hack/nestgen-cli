@@ -87,6 +87,8 @@ if [ "$WITH_SWAGGER" = "y" ]; then
   run_step "Configuration Swagger" bash "$FEATURES_PATH/swagger.sh" "$PM"
 fi
 
+run_step "Configuration du bootstrap Nest" node "$FEATURES_PATH/configure_bootstrap.mjs" src/main.ts "$WITH_SWAGGER"
+
 WITH_GIT=${WITH_GIT:-$(read -p "🔃 Initialiser Git ? (y/n) : " tmp && echo "$tmp")}
 if [ "$WITH_GIT" = "y" ]; then
   run_step "Initialisation Git" bash "$FEATURES_PATH/git.sh"
