@@ -48,6 +48,11 @@ REPOSITORY_TOKEN="${PASCAL}RepositoryToken"
 PROJECT_ROOT="$(pwd -P)"
 SOURCE_ROOT="$PROJECT_ROOT/src/app"
 
+if ! node "$FEATURES_PATH/preflight.mjs" "$PROJECT_ROOT" "$ORM" >/dev/null; then
+  log_error "Le projet cible ne satisfait pas les préconditions de génération."
+  exit 1
+fi
+
 if [ -L "$PROJECT_ROOT/src" ] || [ -L "$SOURCE_ROOT" ]; then
   log_error "Les liens symboliques ne sont pas pris en charge dans src/app."
   exit 1
