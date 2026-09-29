@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import path from 'path';
@@ -15,6 +15,8 @@ const __dirname = path.dirname(__filename);
 const ROOT_PATH = process.env.NESTGEN_ROOT || path.resolve(__dirname, './nestjs-generator');
 const GENERATE_SCRIPT = path.join(ROOT_PATH, 'generate_project.sh');
 const ADD_MODULE_SCRIPT = path.join(ROOT_PATH, './features/add_module.sh');
+const SUPPORTED_ORMS = new Set(['typeorm', 'prisma']);
+const MODULE_NAME_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 
 // ────── Logo CLI
 function printLogo() {
@@ -30,15 +32,60 @@ function printLogo() {
 }
 
 // ────── Helpers
-function isNestProject() {
+export function isNestProject() {
     return fs.existsSync(path.resolve('./src/app.module.ts'));
 }
 
-function parseModuleArgs(args) {
-    const moduleName = args[1];
+export function validateModuleName(value) {
+    const moduleName = String(value ?? '').trim();
+
+    if (!MODULE_NAME_PATTERN.test(moduleName)) {
+        throw new Error('Le nom du module doit commencer par une lettre et ne contenir que des lettres, chiffres, tirets ou underscores.');
+    }
+
+    return moduleName.toLowerCase();
+}
+
+export function validateOrm(value) {
+    const orm = String(value ?? '').trim().toLowerCase();
+
+    if (!SUPPORTED_ORMS.has(orm)) {
+        throw new Error(`ORM non supporté : ${value}. Valeurs acceptées : ${[...SUPPORTED_ORMS].join(', ')}.`);
+    }
+
+    return orm;
+}
+
+export function resolveProjectPath(value) {
+    const projectPath = String(value ?? '').trim();
+
+    if (!projectPath || projectPath.includes('\0')) {
+        throw new Error('Le dossier cible doit être un chemin non vide valide.');
+    }
+
+    return path.resolve(projectPath);
+}
+
+export function parseModuleArgs(args) {
+    const moduleName = validateModuleName(args[1]);
     const ormArg = args.find(arg => arg.startsWith('--orm='));
-    const orm = ormArg ? ormArg.split('=')[1] : 'typeorm';
+    const orm = validateOrm(ormArg ? ormArg.slice('--orm='.length) : 'typeorm');
     return { moduleName, orm };
+}
+
+export function runBashScript(scriptPath, args = [], env = {}) {
+    const result = spawnSync('bash', [scriptPath, ...args], {
+        env: { ...process.env, ...env },
+        stdio: 'inherit',
+    });
+
+    if (result.error) {
+        throw result.error;
+    }
+
+    if (result.status !== 0) {
+        throw new Error(`Le script ${path.basename(scriptPath)} a échoué avec le code ${result.status ?? 'inconnu'}.`);
+    }
 }
 
 // ────── Commande : INIT
@@ -49,12 +96,14 @@ async function askInitQuestions() {
             name: 'projectName',
             message: '📛 Nom du projet :',
             default: 'my-app',
+            validate: validatePromptValue(validateModuleName),
         },
         {
             type: 'input',
             name: 'projectPath',
             message: '📁 Dossier cible :',
             default: './',
+            validate: validatePromptValue(resolveProjectPath),
         },
         {
             type: 'list',
@@ -94,16 +143,27 @@ async function askInitQuestions() {
             message: '📦 Modules à générer (séparés par des espaces) :',
             default: 'user',
             filter: (input) => input.split(' ').map(s => s.trim()).filter(Boolean),
+            validate: validatePromptValue((modules) => modules.forEach(validateModuleName)),
         }
     ]);
+}
+
+function validatePromptValue(validator) {
+    return (value) => {
+        try {
+            validator(value);
+            return true;
+        } catch (error) {
+            return error.message;
+        }
+    };
 }
 
 async function runInteractiveInit() {
     printLogo();
 
     if (!fs.existsSync(GENERATE_SCRIPT)) {
-        console.log(chalk.red(`❌ Script introuvable : ${GENERATE_SCRIPT}`));
-        process.exit(1);
+        throw new Error(`Script introuvable : ${GENERATE_SCRIPT}`);
     }
 
     const answers = await askInitQuestions();
@@ -119,29 +179,18 @@ async function runInteractiveInit() {
     } = answers;
 
     const env = {
-        APP_NAME: projectName,
-        PROJECT_PATH: path.resolve(projectPath),
+        APP_NAME: validateModuleName(projectName),
+        PROJECT_PATH: resolveProjectPath(projectPath),
         PM: packageManager,
-        ORM: orm,
+        ORM: validateOrm(orm),
         WITH_SWAGGER: withSwagger ? 'y' : 'n',
         WITH_DOCKER: withDocker ? 'y' : 'n',
         WITH_GIT: withGit ? 'y' : 'n',
-        MODULES: modules.join(' '),
+        MODULES: modules.map(validateModuleName).join(' '),
     };
 
-    const envExport = Object.entries(env)
-        .map(([key, val]) => `${key}="${val}"`)
-        .join(' ');
-
     console.log('\n🚀 Lancement de la génération du projet...\n');
-    try {
-        execSync(`env ${envExport} bash "${GENERATE_SCRIPT}"`, {
-            stdio: 'inherit',
-        });
-    } catch (err) {
-        console.error(chalk.red('❌ Une erreur est survenue pendant la génération.'));
-        process.exit(1);
-    }
+    runBashScript(GENERATE_SCRIPT, [], env);
 }
 
 // ────── Commande : MODULE
@@ -152,17 +201,13 @@ async function runModuleGeneration(args) {
 
     if (args.length > 1) {
         ({ moduleName, orm } = parseModuleArgs(args));
-        if (!moduleName) {
-            console.log(chalk.red('❌ Tu dois fournir un nom de module.'));
-            process.exit(1);
-        }
     } else {
         const answers = await inquirer.prompt([
             {
                 type: 'input',
                 name: 'moduleName',
                 message: '📦 Nom du module :',
-                validate: input => !!input || 'Le nom du module est requis',
+                validate: validatePromptValue(validateModuleName),
             },
             {
                 type: 'list',
@@ -172,47 +217,45 @@ async function runModuleGeneration(args) {
                 default: 'typeorm',
             },
         ]);
-        moduleName = answers.moduleName;
-        orm = answers.orm;
+        moduleName = validateModuleName(answers.moduleName);
+        orm = validateOrm(answers.orm);
     }
 
     if (!isNestProject()) {
-        console.log(chalk.red('❌ Aucun projet NestJS détecté dans ce dossier.'));
-        console.log('👉 Lance cette commande depuis un projet généré avec `nestgen init`.');
-        process.exit(1);
+        throw new Error('Aucun projet NestJS détecté dans ce dossier. Lance cette commande depuis un projet NestJS.');
     }
 
-    try {
-        console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
-        execSync(`bash "${ADD_MODULE_SCRIPT}" "${moduleName}" "${orm}"`, {
-            stdio: 'inherit',
-        });
-    } catch (err) {
-        console.error(chalk.red('❌ Une erreur est survenue pendant la génération du module.'));
-        process.exit(1);
-    }
+    console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
+    runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm]);
 }
 
 // ────── Entrée CLI
-const args = process.argv.slice(2);
-const command = args[0];
+export async function main(args = process.argv.slice(2)) {
+    const command = args[0];
 
-switch (command) {
-    case 'init':
-        await runInteractiveInit();
-        break;
+    switch (command) {
+        case 'init':
+            await runInteractiveInit();
+            break;
 
-    case 'module':
-        await runModuleGeneration(args);
-        break;
+        case 'module':
+            await runModuleGeneration(args);
+            break;
 
-    default:
-        printLogo();
-        console.log(chalk.gray(`
+        default:
+            printLogo();
+            console.log(chalk.gray(`
 📘 Commandes disponibles :
   ▸ nestgen init                 → Génère un projet complet NestJS (interactive)
   ▸ nestgen module [nom] [--orm=xxx]  → Génère un module (interactive ou CLI)
   ▸ nestgen doctor              → Diagnostic de l’installation CLI
 `));
-        break;
+    }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+    main().catch((error) => {
+        console.error(chalk.red(`❌ ${error.message}`));
+        process.exitCode = 1;
+    });
 }
