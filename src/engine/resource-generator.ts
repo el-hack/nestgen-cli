@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ResourceField, prismaType, typescriptType } from './resource-spec.js';
+import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 
-type Options = { name: string; fields: ResourceField[]; route: string; table: string };
+type Options = { name: string; fields: ResourceField[]; route: string; table: string; profile?: ArchitectureProfile };
 
 function pascal(value: string): string {
     return value
@@ -27,6 +28,7 @@ function dtoFields(fields: ResourceField[]): string {
 }
 
 export function generateResource(projectRoot: string, options: Options): void {
+    const profile = parseArchitectureProfile(options.profile);
     const name = options.name.toLowerCase();
     const className = pascal(name);
     const directory = path.join(projectRoot, 'src', 'app', name);
@@ -65,6 +67,6 @@ export function generateResource(projectRoot: string, options: Options): void {
     );
     fs.writeFileSync(
         path.join(directory, 'resource.json'),
-        `${JSON.stringify({ name, route: options.route, table: options.table, fields: options.fields }, null, 2)}\n`,
+        `${JSON.stringify({ name, route: options.route, table: options.table, profile, fields: options.fields }, null, 2)}\n`,
     );
 }
