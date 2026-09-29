@@ -10,7 +10,7 @@ source "$FEATURES_PATH/logger.sh"
 
 PM=${1:?Package manager requis}
 
-$PM install @nestjs/swagger swagger-ui-express
+pm_add "$PM" @nestjs/swagger@12 swagger-ui-express@5
 
 # Ajout dans main.ts (à faire manuellement ou via automatisation)
 echo ""

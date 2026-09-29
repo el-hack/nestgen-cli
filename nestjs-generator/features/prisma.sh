@@ -16,9 +16,9 @@ if [ -e prisma/schema.prisma ]; then
   exit 1
 fi
 
-$PM install prisma --save-dev
-$PM install @prisma/client
-npx prisma init
+pm_add_dev "$PM" prisma@6
+pm_add "$PM" @prisma/client@6
+pm_exec "$PM" prisma init
 
 if [ ! -e .env ]; then
 cat > .env <<EOF
@@ -39,6 +39,6 @@ datasource db {
 }
 EOF
 
-npx prisma generate
+pm_exec "$PM" prisma generate
 
 echo "✅ Prisma initialisé avec succès !"

@@ -45,14 +45,8 @@ FULL_PATH="$PROJECT_PATH/$APP_NAME"
 PM=${PM:-$(read -p "📦 Package manager (npm/yarn/pnpm) : " tmp && echo "$tmp")}
 ORM=${ORM:-$(read -p "🧠 ORM ? (typeorm/prisma) : " tmp && echo "$tmp")}
 
-INSTALL_CMD=$(get_install_cmd "$PM")
-debug_log "Install command : $PM $INSTALL_CMD"
-
-# ────── Vérification de Nest CLI ──────
-if ! command -v nest &> /dev/null; then
-  log_warn "Nest CLI non installée. Installation avec npm..."
-  run_step "Installation de Nest CLI" npm install -g @nestjs/cli
-fi
+run_step "Vérification du package manager" assert_package_manager "$PM"
+debug_log "Package manager : $PM ; Nest CLI local : $NEST_CLI_VERSION"
 
 # ────── Création du projet ──────
 log_info "Création du projet à $FULL_PATH"
@@ -62,9 +56,9 @@ cd "$FULL_PATH" || {
   exit 1
 }
 
-run_step "Création du projet NestJS" nest new . --package-manager "$PM" --skip-git
+run_step "Création du projet NestJS" nest_new "$PM" .
 
-run_step "Installation des packages communs" "$PM" "$INSTALL_CMD" @nestjs/cqrs class-validator class-transformer @nestjs/config
+run_step "Installation des packages communs" pm_add "$PM" @nestjs/cqrs@12 @nestjs/config@4 class-validator@0.14 class-transformer@0.5
 
 # ────── ORM SETUP ──────
 case "$ORM" in
