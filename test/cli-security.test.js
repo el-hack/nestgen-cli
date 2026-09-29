@@ -15,6 +15,7 @@ const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
 const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
 const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
+const generateProjectScriptPath = path.resolve('nestjs-generator/generate_project.sh');
 
 test('validates module names and supported ORMs', () => {
     assert.equal(validateModuleName('Order-Item'), 'order-item');
@@ -257,4 +258,82 @@ test('binds repository ports through explicit Nest injection tokens', () => {
         assert.match(generatedModule, new RegExp(`useClass: ${repositoryClass[1]},`));
         assert.doesNotMatch(generatedModule, new RegExp(`\\n    ${repositoryClass[1]},`));
     }
+});
+
+function writeExecutable(filePath, content) {
+    fs.writeFileSync(filePath, content, { mode: 0o755 });
+}
+
+function createExternalCommandFixture() {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-external-command-'));
+    const binPath = path.join(fixturePath, 'bin');
+    fs.mkdirSync(binPath);
+    writeExecutable(path.join(binPath, 'nest'), `#!/usr/bin/env bash
+if [[ "\${NESTGEN_TEST_FAIL_NEST:-}" == "1" ]]; then exit 41; fi
+mkdir -p src
+cat > src/app.module.ts <<'EOF'
+import { Module } from '@nestjs/common';
+@Module({ imports: [] })
+export class AppModule {}
+EOF
+`);
+    writeExecutable(path.join(binPath, 'npm'), `#!/usr/bin/env bash
+if [[ "\${NESTGEN_TEST_FAIL_NPM:-}" == "1" ]]; then exit 42; fi
+`);
+    writeExecutable(path.join(binPath, 'git'), `#!/usr/bin/env bash
+if [[ "\${NESTGEN_TEST_FAIL_GIT:-}" == "1" ]]; then exit 43; fi
+`);
+    return { fixturePath, binPath };
+}
+
+function runProjectGeneration(fixturePath, binPath, extraEnvironment = {}) {
+    return spawnSync('bash', [generateProjectScriptPath], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+        env: {
+            ...process.env,
+            APP_NAME: 'sample',
+            PROJECT_PATH: fixturePath,
+            PM: 'npm',
+            ORM: 'typeorm',
+            WITH_DOCKER: 'n',
+            WITH_SWAGGER: 'n',
+            WITH_GIT: 'n',
+            MODULES: '',
+            ...extraEnvironment,
+            PATH: `${binPath}:${process.env.PATH}`,
+        },
+    });
+}
+
+test('stops project generation on external command failures without success output', () => {
+    const nestFailure = createExternalCommandFixture();
+    const failedNest = runProjectGeneration(nestFailure.fixturePath, nestFailure.binPath, { NESTGEN_TEST_FAIL_NEST: '1' });
+    assert.equal(failedNest.status, 41);
+    assert.match(failedNest.stdout, /Création du projet NestJS a échoué/);
+    assert.doesNotMatch(failedNest.stdout, /généré avec succès/);
+
+    const npmFailure = createExternalCommandFixture();
+    const failedNpm = runProjectGeneration(npmFailure.fixturePath, npmFailure.binPath, { NESTGEN_TEST_FAIL_NPM: '1' });
+    assert.equal(failedNpm.status, 42);
+    assert.match(failedNpm.stdout, /Installation des packages communs a échoué/);
+    assert.doesNotMatch(failedNpm.stdout, /généré avec succès/);
+
+    const gitFailure = createExternalCommandFixture();
+    const failedGit = runProjectGeneration(gitFailure.fixturePath, gitFailure.binPath, {
+        WITH_GIT: 'y',
+        NESTGEN_TEST_FAIL_GIT: '1',
+    });
+    assert.equal(failedGit.status, 43);
+    assert.match(failedGit.stdout, /Initialisation Git a échoué/);
+    assert.doesNotMatch(failedGit.stdout, /généré avec succès/);
+});
+
+test('completes a zero-module project generation after every external step succeeds', () => {
+    const { fixturePath, binPath } = createExternalCommandFixture();
+    const result = runProjectGeneration(fixturePath, binPath);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Projet NestJS "sample" généré avec succès/);
+    assert.equal(fs.existsSync(path.join(fixturePath, 'sample', 'src', 'app.module.ts')), true);
 });
