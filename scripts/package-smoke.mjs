@@ -74,10 +74,11 @@ function writeConsumerProject() {
 function assertTarballContents(packResult) {
     const [tarball] = JSON.parse(packResult.stdout);
     const files = tarball.files.map(({ path: filePath }) => filePath).sort();
-    const allowedPaths = /^(package\.json|LICENSE|readme\.md|nestgen\.js|nestjs-generator\/)/;
+    const allowedPaths = /^(package\.json|LICENSE|readme\.md|nestgen\.js|dist\/|nestjs-generator\/)/;
     const requiredPaths = [
         'package.json',
         'nestgen.js',
+        'dist/engine/module-generator.js',
         'nestjs-generator/generate_project.sh',
         'nestjs-generator/features/add_module.sh',
         'nestjs-generator/features/preflight.mjs',

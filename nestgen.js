@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { inspectProject } from './nestjs-generator/features/preflight.mjs';
+import { generateModule } from './dist/engine/module-generator.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -300,12 +301,12 @@ async function runModuleGeneration(parsed) {
     }
 
     if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
-    runBashScript(
-        ADD_MODULE_SCRIPT,
-        [moduleName, orm],
-        { NESTGEN_VERBOSE: parsed.options.verbose ? '1' : '0' },
-        parsed.options.quiet,
-    );
+    if (process.env.NESTGEN_ROOT) {
+        runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], {}, parsed.options.quiet);
+        return;
+    }
+
+    generateModule(process.cwd(), moduleName, orm);
 }
 
 function printUsage() {

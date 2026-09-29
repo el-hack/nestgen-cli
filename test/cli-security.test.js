@@ -14,6 +14,7 @@ import {
 } from '../nestgen.js';
 import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
+import { generateModule } from '../dist/engine/module-generator.js';
 
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
@@ -178,6 +179,22 @@ test('does not create a module directory when preflight fails', () => {
     });
     assert.equal(result.status, 1);
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice')), false);
+});
+
+test('generates a module through the TypeScript engine and structurally registers it', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typescript-engine-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    writeNestManifest(fixturePath);
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+
+    generateModule(fixturePath, 'invoice-item', 'typeorm');
+
+    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice-item', 'invoice-item.module.ts')), true);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /InvoiceItemModule/);
+    assert.equal(fs.existsSync(path.join(fixturePath, '.nestgen-transaction.json')), false);
 });
 
 test('maps package manager operations without a global Nest CLI', () => {
