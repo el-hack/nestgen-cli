@@ -25,16 +25,19 @@ const generateProjectScriptPath = path.resolve('nestjs-generator/generate_projec
 const packageManagerHelpersPath = path.resolve('nestjs-generator/features/utils.sh');
 
 function writeNestManifest(fixturePath) {
-    fs.writeFileSync(path.join(fixturePath, 'package.json'), JSON.stringify({
-        dependencies: {
-            '@nestjs/common': '12.0.0',
-            '@nestjs/core': '12.0.0',
-            '@nestjs/cqrs': '12.0.0',
-            '@nestjs/typeorm': '12.0.0',
-            typeorm: '0.3.0',
-            '@prisma/client': '6.0.0',
-        },
-    }));
+    fs.writeFileSync(
+        path.join(fixturePath, 'package.json'),
+        JSON.stringify({
+            dependencies: {
+                '@nestjs/common': '12.0.0',
+                '@nestjs/core': '12.0.0',
+                '@nestjs/cqrs': '12.0.0',
+                '@nestjs/typeorm': '12.0.0',
+                typeorm: '0.3.0',
+                '@prisma/client': '6.0.0',
+            },
+        }),
+    );
 }
 
 test('validates module names and supported ORMs', () => {
@@ -55,7 +58,18 @@ test('validates module names and supported ORMs', () => {
 
 test('parses scriptable CLI options and returns errors for invalid usage', () => {
     assert.deepEqual(parseCliArgs(['module', 'order', '--orm', 'prisma', '--no-interactive', '--quiet']), {
-        command: 'module', positionals: ['order'], options: { orm: 'prisma', noInteractive: true, quiet: true, verbose: false, color: true, help: false, version: false, dryRun: false },
+        command: 'module',
+        positionals: ['order'],
+        options: {
+            orm: 'prisma',
+            noInteractive: true,
+            quiet: true,
+            verbose: false,
+            color: true,
+            help: false,
+            version: false,
+            dryRun: false,
+        },
     });
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
     assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
@@ -90,20 +104,48 @@ test('exposes stable help, version and error exit codes', () => {
 
 test('normalizes resource names consistently across supported separators', () => {
     assert.deepEqual(describeResource('user'), {
-        name: 'user', pascal: 'User', camel: 'user', plural: 'users', route: 'users', table: 'users',
+        name: 'user',
+        pascal: 'User',
+        camel: 'user',
+        plural: 'users',
+        route: 'users',
+        table: 'users',
     });
     assert.deepEqual(describeResource('User'), {
-        name: 'user', pascal: 'User', camel: 'user', plural: 'users', route: 'users', table: 'users',
+        name: 'user',
+        pascal: 'User',
+        camel: 'user',
+        plural: 'users',
+        route: 'users',
+        table: 'users',
     });
     assert.deepEqual(describeResource('order-item'), {
-        name: 'order-item', pascal: 'OrderItem', camel: 'orderItem', plural: 'order-items', route: 'order-items', table: 'order_items',
+        name: 'order-item',
+        pascal: 'OrderItem',
+        camel: 'orderItem',
+        plural: 'order-items',
+        route: 'order-items',
+        table: 'order_items',
     });
     assert.deepEqual(describeResource('order_item'), {
-        name: 'order-item', pascal: 'OrderItem', camel: 'orderItem', plural: 'order-items', route: 'order-items', table: 'order_items',
+        name: 'order-item',
+        pascal: 'OrderItem',
+        camel: 'orderItem',
+        plural: 'order-items',
+        route: 'order-items',
+        table: 'order_items',
     });
-    assert.deepEqual(describeResource('category', { plural: 'categories', route: 'catalog', table: 'catalog_entries' }), {
-        name: 'category', pascal: 'Category', camel: 'category', plural: 'categories', route: 'catalog', table: 'catalog_entries',
-    });
+    assert.deepEqual(
+        describeResource('category', { plural: 'categories', route: 'catalog', table: 'catalog_entries' }),
+        {
+            name: 'category',
+            pascal: 'Category',
+            camel: 'category',
+            plural: 'categories',
+            route: 'catalog',
+            table: 'catalog_entries',
+        },
+    );
 });
 
 test('reports unsupported Nest project structures before generation', () => {
@@ -114,7 +156,10 @@ test('reports unsupported Nest project structures before generation', () => {
     assert.throws(() => inspectProject(fixturePath, 'typeorm'), /src\/app\.module\.ts introuvable/);
 
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(fixturePath, 'src', 'app.module.ts'), "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n");
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
     fs.writeFileSync(path.join(fixturePath, 'nest-cli.json'), JSON.stringify({ monorepo: true }));
     assert.throws(() => inspectProject(fixturePath, 'typeorm'), /workspaces Nest/);
 });
@@ -122,9 +167,15 @@ test('reports unsupported Nest project structures before generation', () => {
 test('does not create a module directory when preflight fails', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-preflight-no-write-'));
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(fixturePath, 'src', 'app.module.ts'), "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n");
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
 
-    const result = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], { cwd: fixturePath, encoding: 'utf8' });
+    const result = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
     assert.equal(result.status, 1);
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice')), false);
 });
@@ -136,17 +187,30 @@ test('maps package manager operations without a global Nest CLI', () => {
     fs.mkdirSync(binPath);
 
     for (const command of ['npm', 'pnpm', 'yarn', 'npx']) {
-        writeExecutable(path.join(binPath, command), `#!/usr/bin/env bash
+        writeExecutable(
+            path.join(binPath, command),
+            `#!/usr/bin/env bash
 printf '%s\\n' "$(basename \"$0\") $*" >> "$COMMAND_LOG"
-`);
+`,
+        );
     }
 
     for (const packageManager of ['npm', 'pnpm', 'yarn']) {
-        const result = spawnSync('bash', ['-c', 'source "$1"; pm_add "$2" example@1; nest_new "$2" .', 'bash', packageManagerHelpersPath, packageManager], {
-            cwd: fixturePath,
-            encoding: 'utf8',
-            env: { ...process.env, PATH: `${binPath}:${process.env.PATH}`, COMMAND_LOG: commandLog },
-        });
+        const result = spawnSync(
+            'bash',
+            [
+                '-c',
+                'source "$1"; pm_add "$2" example@1; nest_new "$2" .',
+                'bash',
+                packageManagerHelpersPath,
+                packageManager,
+            ],
+            {
+                cwd: fixturePath,
+                encoding: 'utf8',
+                env: { ...process.env, PATH: `${binPath}:${process.env.PATH}`, COMMAND_LOG: commandLog },
+            },
+        );
         assert.equal(result.status, 0, result.stderr);
     }
 
@@ -215,7 +279,10 @@ test('refuses to overwrite an existing generated module', () => {
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
 
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
     writeNestManifest(fixturePath);
 
     const firstGeneration = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
@@ -224,7 +291,16 @@ test('refuses to overwrite an existing generated module', () => {
     });
     assert.equal(firstGeneration.status, 0, firstGeneration.stderr);
 
-    const entityPath = path.join(fixturePath, 'src', 'app', 'invoice', 'core', 'domain', 'entities', 'invoice.entity.ts');
+    const entityPath = path.join(
+        fixturePath,
+        'src',
+        'app',
+        'invoice',
+        'core',
+        'domain',
+        'entities',
+        'invoice.entity.ts',
+    );
     fs.appendFileSync(entityPath, '\n// user customization\n');
 
     const secondGeneration = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
@@ -295,7 +371,10 @@ test('registers a generated module in AppModule exactly once', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [],\n})\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [],\n})\nexport class AppModule {}\n",
+    );
     writeGeneratedModule(fixturePath, 'order', 'OrderModule');
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -317,7 +396,10 @@ test('updates a multiline AppModule and leaves unsupported forms untouched', () 
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-multiline-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [\n    ExistingModule,\n  ],\n})\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [\n    ExistingModule,\n  ],\n})\nexport class AppModule {}\n",
+    );
     writeGeneratedModule(fixturePath, 'invoice', 'InvoiceModule');
 
     const supported = spawnSync('bash', [injectModuleScriptPath, 'invoice', 'prisma'], {
@@ -325,9 +407,15 @@ test('updates a multiline AppModule and leaves unsupported forms untouched', () 
         encoding: 'utf8',
     });
     assert.equal(supported.status, 0, supported.stderr);
-    assert.match(decoratorImports(fs.readFileSync(appModulePath, 'utf8')), /ExistingModule,[\s\S]*CqrsModule,[\s\S]*InvoiceModule/);
+    assert.match(
+        decoratorImports(fs.readFileSync(appModulePath, 'utf8')),
+        /ExistingModule,[\s\S]*CqrsModule,[\s\S]*InvoiceModule/,
+    );
 
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ controllers: [] })\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n@Module({ controllers: [] })\nexport class AppModule {}\n",
+    );
     const before = fs.readFileSync(appModulePath, 'utf8');
     const unsupported = spawnSync('bash', [injectModuleScriptPath, 'invoice', 'prisma'], {
         cwd: fixturePath,
@@ -342,7 +430,10 @@ test('keeps the TypeORM root configuration idempotent', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-typeorm-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
     writeGeneratedModule(fixturePath, 'customer', 'CustomerModule');
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -375,7 +466,10 @@ test('generates TypeORM environment configuration and explicit migrations', () =
     const config = fs.readFileSync(path.join(fixturePath, 'src', 'database', 'typeorm.config.ts'), 'utf8');
     assert.match(config, /synchronize: false/);
     assert.match(config, /migrationsRun: false/);
-    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'database', 'migrations', '0000000000000-InitialSchema.ts')), true);
+    assert.equal(
+        fs.existsSync(path.join(fixturePath, 'src', 'database', 'migrations', '0000000000000-InitialSchema.ts')),
+        true,
+    );
     assert.match(fs.readFileSync(path.join(fixturePath, '.env.example'), 'utf8'), /DATABASE_PASSWORD=change-me/);
 });
 
@@ -400,10 +494,16 @@ test('preserves an existing TypeORM root connection during module generation', (
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-existing-typeorm-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\n@Module({ imports: [TypeOrmModule.forRoot({ database: 'existing' })] })\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\n@Module({ imports: [TypeOrmModule.forRoot({ database: 'existing' })] })\nexport class AppModule {}\n",
+    );
     writeNestManifest(fixturePath);
 
-    const result = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], { cwd: fixturePath, encoding: 'utf8' });
+    const result = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
     assert.equal(result.status, 0, result.stderr);
     const appModule = fs.readFileSync(appModulePath, 'utf8');
     assert.equal((appModule.match(/TypeOrmModule\.forRoot/g) ?? []).length, 1);
@@ -415,7 +515,10 @@ test('binds repository ports through explicit Nest injection tokens', () => {
         const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), `nestgen-repository-di-${orm}-`));
         const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
         fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-        fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+        fs.writeFileSync(
+            appModulePath,
+            "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+        );
         writeNestManifest(fixturePath);
 
         const result = spawnSync('bash', [addModuleScriptPath, 'order', orm], {
@@ -426,7 +529,10 @@ test('binds repository ports through explicit Nest injection tokens', () => {
 
         const moduleRoot = path.join(fixturePath, 'src', 'app', 'order');
         const port = fs.readFileSync(path.join(moduleRoot, 'core', 'domain', 'ports', 'order.repository.ts'), 'utf8');
-        const handler = fs.readFileSync(path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'), 'utf8');
+        const handler = fs.readFileSync(
+            path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'),
+            'utf8',
+        );
         const generatedModule = fs.readFileSync(path.join(moduleRoot, 'order.module.ts'), 'utf8');
         const token = port.match(/export const (\w+RepositoryToken) = Symbol\('([^']+RepositoryPort)'\);/);
         const repositoryClass = generatedModule.match(/useClass: (\w+Repository),/);
@@ -438,8 +544,14 @@ test('binds repository ports through explicit Nest injection tokens', () => {
         assert.match(generatedModule, new RegExp(`useClass: ${repositoryClass[1]},`));
         assert.doesNotMatch(generatedModule, new RegExp(`\\n    ${repositoryClass[1]},`));
         if (orm === 'typeorm') {
-            const handler = fs.readFileSync(path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'), 'utf8');
-            const repository = fs.readFileSync(path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order.typeorm.repository.ts'), 'utf8');
+            const handler = fs.readFileSync(
+                path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'),
+                'utf8',
+            );
+            const repository = fs.readFileSync(
+                path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order.typeorm.repository.ts'),
+                'utf8',
+            );
             assert.match(handler, /new Order\(undefined, command\.name, command\.email\)/);
             assert.match(repository, /this\.repo\.create\(\{\n      name: order\.name,/);
         }
@@ -450,7 +562,10 @@ test('uses portable resource names for generated classes, routes and tables', ()
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-name-'));
     const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
     fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
-    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+    fs.writeFileSync(
+        appModulePath,
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
     writeNestManifest(fixturePath);
 
     const result = spawnSync('bash', [addModuleScriptPath, 'order_item', 'typeorm'], {
@@ -466,8 +581,14 @@ test('uses portable resource names for generated classes, routes and tables', ()
 
     const moduleRoot = path.join(fixturePath, 'src', 'app', 'order-item');
     const entity = fs.readFileSync(path.join(moduleRoot, 'core', 'domain', 'entities', 'order-item.entity.ts'), 'utf8');
-    const controller = fs.readFileSync(path.join(moduleRoot, 'interfaces', 'controllers', 'order-item.controller.ts'), 'utf8');
-    const ormEntity = fs.readFileSync(path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order-item.orm.ts'), 'utf8');
+    const controller = fs.readFileSync(
+        path.join(moduleRoot, 'interfaces', 'controllers', 'order-item.controller.ts'),
+        'utf8',
+    );
+    const ormEntity = fs.readFileSync(
+        path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order-item.orm.ts'),
+        'utf8',
+    );
     assert.match(entity, /export class OrderItem/);
     assert.match(controller, /@Controller\('purchase-orders'\)/);
     assert.match(ormEntity, /@Entity\('purchase_orders'\)/);
@@ -481,7 +602,9 @@ function createExternalCommandFixture() {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-external-command-'));
     const binPath = path.join(fixturePath, 'bin');
     fs.mkdirSync(binPath);
-    writeExecutable(path.join(binPath, 'npx'), `#!/usr/bin/env bash
+    writeExecutable(
+        path.join(binPath, 'npx'),
+        `#!/usr/bin/env bash
 if [[ "\${NESTGEN_TEST_FAIL_NEST:-}" == "1" ]]; then exit 41; fi
 mkdir -p src
 cat > src/app.module.ts <<'EOF'
@@ -492,13 +615,20 @@ EOF
 cat > src/main.ts <<'EOF'
 export {};
 EOF
-`);
-    writeExecutable(path.join(binPath, 'npm'), `#!/usr/bin/env bash
+`,
+    );
+    writeExecutable(
+        path.join(binPath, 'npm'),
+        `#!/usr/bin/env bash
 if [[ "\${NESTGEN_TEST_FAIL_NPM:-}" == "1" ]]; then exit 42; fi
-`);
-    writeExecutable(path.join(binPath, 'git'), `#!/usr/bin/env bash
+`,
+    );
+    writeExecutable(
+        path.join(binPath, 'git'),
+        `#!/usr/bin/env bash
 if [[ "\${NESTGEN_TEST_FAIL_GIT:-}" == "1" ]]; then exit 43; fi
-`);
+`,
+    );
     return { fixturePath, binPath };
 }
 
@@ -524,7 +654,9 @@ function runProjectGeneration(fixturePath, binPath, extraEnvironment = {}) {
 
 test('stops project generation on external command failures without success output', () => {
     const nestFailure = createExternalCommandFixture();
-    const failedNest = runProjectGeneration(nestFailure.fixturePath, nestFailure.binPath, { NESTGEN_TEST_FAIL_NEST: '1' });
+    const failedNest = runProjectGeneration(nestFailure.fixturePath, nestFailure.binPath, {
+        NESTGEN_TEST_FAIL_NEST: '1',
+    });
     assert.equal(failedNest.status, 41);
     assert.match(failedNest.stdout, /Création du projet NestJS a échoué/);
     assert.doesNotMatch(failedNest.stdout, /généré avec succès/);

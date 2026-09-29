@@ -21,14 +21,16 @@ const MODULE_NAME_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 
 // ────── Logo CLI
 function printLogo() {
-    console.log(chalk.magentaBright(`
+    console.log(
+        chalk.magentaBright(`
 ███╗   ██╗███████╗███████╗████████╗ ██████╗ ███████╗███╗   ██╗
 ████╗  ██║██╔════╝██╔════╝╚══██╔══╝██╔════╝ ██╔════╝████╗  ██║
 ██╔██╗ ██║█████╗  ███████╗   ██║   ██║  ███╗█████╗  ██╔██╗ ██║
 ██║╚██╗██║██╔══╝  ╚════██║   ██║   ██║   ██║██╔══╝  ██║╚██╗██║
 ██║ ╚████║███████╗███████║   ██║   ╚██████╔╝███████╗██║ ╚████║
 ╚═╝  ╚═══╝╚══════╝╚══════╝   ╚═╝    ╚═════╝ ╚══════╝╚═╝  ╚═══╝
-`));
+`),
+    );
     console.log(chalk.cyan.bold('✨ NestGen CLI — Générateur modulaire NestJS'));
 }
 
@@ -41,14 +43,18 @@ export function validateModuleName(value) {
     const moduleName = String(value ?? '').trim();
 
     if (!MODULE_NAME_PATTERN.test(moduleName)) {
-        throw new Error('Le nom du module doit commencer par une lettre et ne contenir que des lettres, chiffres, tirets ou underscores.');
+        throw new Error(
+            'Le nom du module doit commencer par une lettre et ne contenir que des lettres, chiffres, tirets ou underscores.',
+        );
     }
 
     return moduleName.toLowerCase();
 }
 
 export function validateOrm(value) {
-    const orm = String(value ?? '').trim().toLowerCase();
+    const orm = String(value ?? '')
+        .trim()
+        .toLowerCase();
 
     if (!SUPPORTED_ORMS.has(orm)) {
         throw new Error(`ORM non supporté : ${value}. Valeurs acceptées : ${[...SUPPORTED_ORMS].join(', ')}.`);
@@ -69,12 +75,22 @@ export function resolveProjectPath(value) {
 
 export function parseModuleArgs(args) {
     const parsed = parseCliArgs(args);
-    if (parsed.command !== 'module' || !parsed.positionals[0]) throw new Error('La commande module requiert un nom de module.');
+    if (parsed.command !== 'module' || !parsed.positionals[0])
+        throw new Error('La commande module requiert un nom de module.');
     return { moduleName: validateModuleName(parsed.positionals[0]), orm: validateOrm(parsed.options.orm) };
 }
 
 export function parseCliArgs(args) {
-    const options = { orm: 'typeorm', noInteractive: false, quiet: false, verbose: false, color: true, help: false, version: false, dryRun: false };
+    const options = {
+        orm: 'typeorm',
+        noInteractive: false,
+        quiet: false,
+        verbose: false,
+        color: true,
+        help: false,
+        version: false,
+        dryRun: false,
+    };
     const positionals = [];
     for (let index = 0; index < args.length; index += 1) {
         const argument = args[index];
@@ -101,7 +117,10 @@ export function createModulePlan(projectRoot, moduleName, orm) {
     const normalizedOrm = validateOrm(orm);
     const resourceRoot = `src/app/${normalizedName}`;
     return {
-        operation: 'module', module: normalizedName, orm: normalizedOrm, projectRoot,
+        operation: 'module',
+        module: normalizedName,
+        orm: normalizedOrm,
+        projectRoot,
         files: [
             `${resourceRoot}/core/domain/entities/${normalizedName}.entity.ts`,
             `${resourceRoot}/core/domain/ports/${normalizedName}.repository.ts`,
@@ -114,7 +133,9 @@ export function createModulePlan(projectRoot, moduleName, orm) {
         mutations: [
             'Ajoute le module dans @Module({ imports }) de src/app.module.ts.',
             'Ajoute CqrsModule dans src/app.module.ts si nécessaire.',
-            ...(normalizedOrm === 'typeorm' ? ['Ajoute la configuration TypeORM racine seulement si elle est absente.'] : []),
+            ...(normalizedOrm === 'typeorm'
+                ? ['Ajoute la configuration TypeORM racine seulement si elle est absente.']
+                : []),
         ],
     };
 }
@@ -188,9 +209,13 @@ async function askInitQuestions() {
             name: 'modules',
             message: '📦 Modules à générer (séparés par des espaces) :',
             default: 'user',
-            filter: (input) => input.split(' ').map(s => s.trim()).filter(Boolean),
+            filter: (input) =>
+                input
+                    .split(' ')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
             validate: validatePromptValue((modules) => modules.forEach(validateModuleName)),
-        }
+        },
     ]);
 }
 
@@ -207,23 +232,17 @@ function validatePromptValue(validator) {
 
 async function runInteractiveInit(options) {
     if (!options.quiet) printLogo();
-    if (options.noInteractive) throw new Error('init --no-interactive requiert des options de projet qui ne sont pas encore prises en charge.');
+    if (options.noInteractive)
+        throw new Error(
+            'init --no-interactive requiert des options de projet qui ne sont pas encore prises en charge.',
+        );
 
     if (!fs.existsSync(GENERATE_SCRIPT)) {
         throw new Error(`Script introuvable : ${GENERATE_SCRIPT}`);
     }
 
     const answers = await askInitQuestions();
-    const {
-        projectName,
-        projectPath,
-        packageManager,
-        orm,
-        withSwagger,
-        withDocker,
-        withGit,
-        modules,
-    } = answers;
+    const { projectName, projectPath, packageManager, orm, withSwagger, withDocker, withGit, modules } = answers;
 
     const env = {
         APP_NAME: validateModuleName(projectName),
@@ -281,24 +300,46 @@ async function runModuleGeneration(parsed) {
     }
 
     if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
-    runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], { NESTGEN_VERBOSE: parsed.options.verbose ? '1' : '0' }, parsed.options.quiet);
+    runBashScript(
+        ADD_MODULE_SCRIPT,
+        [moduleName, orm],
+        { NESTGEN_VERBOSE: parsed.options.verbose ? '1' : '0' },
+        parsed.options.quiet,
+    );
 }
 
 function printUsage() {
-    console.log(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --dry-run                    Affiche le plan sans écrire`);
+    console.log(
+        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --dry-run                    Affiche le plan sans écrire`,
+    );
 }
 
 function runDoctor() {
     const checks = [
-        ['Node.js', process.versions.node, Number(process.versions.node.split('.')[0]) >= 24, 'Installe Node.js 24 LTS ou une version supportée.'],
-        ['Scripts NestGen', `${GENERATE_SCRIPT}, ${ADD_MODULE_SCRIPT}`, fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT), 'Réinstalle NestGen.'],
+        [
+            'Node.js',
+            process.versions.node,
+            Number(process.versions.node.split('.')[0]) >= 24,
+            'Installe Node.js 24 LTS ou une version supportée.',
+        ],
+        [
+            'Scripts NestGen',
+            `${GENERATE_SCRIPT}, ${ADD_MODULE_SCRIPT}`,
+            fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT),
+            'Réinstalle NestGen.',
+        ],
     ];
-    for (const [name, detail, valid, advice] of checks) console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
+    for (const [name, detail, valid, advice] of checks)
+        console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
     try {
         const project = inspectProject(process.cwd(), 'typeorm');
-        console.log(`OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`);
+        console.log(
+            `OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`,
+        );
     } catch (error) {
-        console.log(`INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`);
+        console.log(
+            `INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`,
+        );
     }
     if (checks.some(([, , valid]) => !valid)) throw new Error('Des prérequis NestGen sont manquants.');
 }
@@ -335,7 +376,7 @@ export async function main(args = process.argv.slice(2)) {
     }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === __filename) {
     main().catch((error) => {
         console.error(chalk.red(`❌ ${error.message}`));
         process.exitCode = 1;

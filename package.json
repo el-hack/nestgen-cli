@@ -1,40 +1,50 @@
 {
-  "name": "nestgen-cli",
-  "version": "0.0.7",
-  "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
-  "files": [
-    "nestgen.js",
-    "nestjs-generator"
-  ],
-  "bin": {
-    "nestgen": "nestgen.js"
-  },
-  "author": "Aristide kamara bakarykamara52@gmail.com",
-  "license": "MIT",
-  "keywords": [
-    "nestjs",
-    "cli",
-    "ddd",
-    "cqrs",
-    "scaffold",
-    "generator",
-    "hexagonal"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/el-hack/nestgen-cli.git"
-  },
-  "type": "module",
-  "engines": {
-    "node": ">=24.15.0 <27"
-  },
-  "packageManager": "npm@11.0.0",
-  "scripts": {
-    "test": "node --test"
-  },
-  "licenses": "MIT",
-  "dependencies": {
-    "chalk": "^5.3.0",
-    "inquirer": "^9.0.0"
-  }
+    "name": "nestgen-cli",
+    "version": "0.0.7",
+    "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
+    "files": [
+        "nestgen.js",
+        "nestjs-generator"
+    ],
+    "bin": {
+        "nestgen": "nestgen.js"
+    },
+    "author": "Aristide kamara bakarykamara52@gmail.com",
+    "license": "MIT",
+    "keywords": [
+        "nestjs",
+        "cli",
+        "ddd",
+        "cqrs",
+        "scaffold",
+        "generator",
+        "hexagonal"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/el-hack/nestgen-cli.git"
+    },
+    "type": "module",
+    "engines": {
+        "node": ">=24.15.0 <27"
+    },
+    "packageManager": "npm@11.0.0",
+    "scripts": {
+        "check": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "prepack": "npm run check && npm run format:check && npm test",
+        "test": "node --test",
+        "test:package": "node scripts/package-smoke.mjs"
+    },
+    "licenses": "MIT",
+    "dependencies": {
+        "chalk": "^5.3.0",
+        "inquirer": "^9.0.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.5",
+        "eslint": "^9.39.5",
+        "prettier": "^3.9.9"
+    }
 }
