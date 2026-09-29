@@ -12,6 +12,8 @@ import {
 } from '../nestgen.js';
 
 const cliPath = path.resolve('nestgen.js');
+const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
+const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
 
 test('validates module names and supported ORMs', () => {
     assert.equal(validateModuleName('Order-Item'), 'order-item');
@@ -78,4 +80,74 @@ test('rejects a malicious module name before running the generator script', () =
 
     assert.equal(accepted.status, 0);
     assert.equal(fs.readFileSync(outputPath, 'utf8'), 'order-item');
+});
+
+test('refuses to overwrite an existing generated module', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-module-collision-'));
+    const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+
+    fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+
+    const firstGeneration = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(firstGeneration.status, 0, firstGeneration.stderr);
+
+    const entityPath = path.join(fixturePath, 'src', 'app', 'invoice', 'core', 'domain', 'entities', 'invoice.entity.ts');
+    fs.appendFileSync(entityPath, '\n// user customization\n');
+
+    const secondGeneration = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(secondGeneration.status, 1);
+    assert.match(fs.readFileSync(entityPath, 'utf8'), /user customization/);
+
+    const traversal = spawnSync('bash', [addModuleScriptPath, '../../outside', 'prisma'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(traversal.status, 1);
+    assert.equal(fs.existsSync(path.join(fixturePath, 'outside')), false);
+});
+
+test('preserves an existing environment file when Docker is requested', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-env-collision-'));
+    const environmentPath = path.join(fixturePath, '.env');
+    fs.writeFileSync(environmentPath, 'CUSTOM_VALUE=preserve-me\n');
+
+    const result = spawnSync('bash', [dockerScriptPath, 'my-app'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(environmentPath, 'utf8'), 'CUSTOM_VALUE=preserve-me\n');
+});
+
+test('refuses Docker file collisions and source symlinks without changing their targets', () => {
+    const dockerFixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-docker-collision-'));
+    const dockerfilePath = path.join(dockerFixturePath, 'Dockerfile');
+    fs.writeFileSync(dockerfilePath, '# custom Dockerfile\n');
+
+    const dockerCollision = spawnSync('bash', [dockerScriptPath, 'my-app'], {
+        cwd: dockerFixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(dockerCollision.status, 1);
+    assert.equal(fs.readFileSync(dockerfilePath, 'utf8'), '# custom Dockerfile\n');
+
+    const symlinkFixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-symlink-collision-'));
+    const outsidePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-outside-'));
+    fs.mkdirSync(path.join(symlinkFixturePath, 'src'), { recursive: true });
+    fs.symlinkSync(outsidePath, path.join(symlinkFixturePath, 'src', 'app'));
+
+    const symlinkAttempt = spawnSync('bash', [addModuleScriptPath, 'invoice', 'typeorm'], {
+        cwd: symlinkFixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(symlinkAttempt.status, 1);
+    assert.equal(fs.readdirSync(outsidePath).length, 0);
 });

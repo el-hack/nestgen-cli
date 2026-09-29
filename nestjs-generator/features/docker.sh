@@ -9,6 +9,11 @@ source "$FEATURES_PATH/logger.sh"
 
 APP_NAME=$1
 
+if [ -e Dockerfile ] || [ -e docker-compose.yml ]; then
+  echo "❌ Dockerfile ou docker-compose.yml existe déjà. Aucune configuration Docker n'a été remplacée."
+  exit 1
+fi
+
 cat > Dockerfile <<EOF
 FROM node:18-alpine
 WORKDIR /usr/src/app
@@ -51,9 +56,13 @@ volumes:
   pgdata:
 EOF
 
+if [ ! -e .env ]; then
 cat > .env <<EOF
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/appdb
 PORT=3000
 EOF
+else
+  echo "ℹ️  .env existe déjà et a été conservé."
+fi
 
 echo "✅ Dockerfile, docker-compose et .env générés !"

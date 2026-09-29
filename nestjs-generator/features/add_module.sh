@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 RAW_NAME=$1
 ORM=$2
 
@@ -9,13 +11,13 @@ source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-if [ -z "$RAW_NAME" ]; then
-  echo "❌ Tu dois passer un nom de module."
+if [[ ! "$RAW_NAME" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
+  log_error "Le nom du module doit commencer par une lettre et ne contenir que des lettres, chiffres, tirets ou underscores."
   exit 1
 fi
 
-if [ -z "$ORM" ]; then
-  echo "❌ ORM manquant (typeorm ou prisma)."
+if [[ "$ORM" != "typeorm" && "$ORM" != "prisma" ]]; then
+  log_error "ORM non supporté : ${ORM:-vide}. Valeurs acceptées : typeorm, prisma."
   exit 1
 fi
 
@@ -28,7 +30,22 @@ PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\U\2/g' | sed -E 's/[-_]//g')
 
 CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
 
-MODULE_DIR="src/app/$NAME"
+PROJECT_ROOT="$(pwd -P)"
+SOURCE_ROOT="$PROJECT_ROOT/src/app"
+
+if [ -L "$PROJECT_ROOT/src" ] || [ -L "$SOURCE_ROOT" ]; then
+  log_error "Les liens symboliques ne sont pas pris en charge dans src/app."
+  exit 1
+fi
+
+mkdir -p "$SOURCE_ROOT"
+MODULE_DIR="$SOURCE_ROOT/$NAME"
+
+if [ -e "$MODULE_DIR" ] || [ -L "$MODULE_DIR" ]; then
+  log_error "Le module $NAME existe déjà. Aucune modification n'a été appliquée."
+  exit 1
+fi
+
 mkdir -p "$MODULE_DIR"/{core/{application/{commands,events,queries},domain/{entities,ports}},infrastructure/{adapters,persistences/repositories},interfaces/{controllers,dtos}}
 
 # ────── Entity ──────
@@ -231,4 +248,3 @@ export class ${PASCAL}Module {}
 " > "$MODULE_DIR/${NAME}.module.ts"
 
 bash "$(dirname "$0")/inject_module_to_app.sh" "$NAME" "$ORM"
-
