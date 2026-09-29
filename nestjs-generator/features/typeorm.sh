@@ -10,11 +10,9 @@ FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
-INSTALL_CMD=$(get_install_cmd "$PM")
-
 log_info "📦 Installation de TypeORM et PostgreSQL..."
 
-$PM $INSTALL_CMD @nestjs/typeorm typeorm pg
+pm_add "$PM" @nestjs/typeorm@12 typeorm@0.3 pg@8
 
 log_success "✅ TypeORM installé avec succès"
 

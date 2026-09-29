@@ -17,6 +17,7 @@ const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.s
 const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
 const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
 const generateProjectScriptPath = path.resolve('nestjs-generator/generate_project.sh');
+const packageManagerHelpersPath = path.resolve('nestjs-generator/features/utils.sh');
 
 test('validates module names and supported ORMs', () => {
     assert.equal(validateModuleName('Order-Item'), 'order-item');
@@ -50,6 +51,36 @@ test('normalizes resource names consistently across supported separators', () =>
     assert.deepEqual(describeResource('category', { plural: 'categories', route: 'catalog', table: 'catalog_entries' }), {
         name: 'category', pascal: 'Category', camel: 'category', plural: 'categories', route: 'catalog', table: 'catalog_entries',
     });
+});
+
+test('maps package manager operations without a global Nest CLI', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-package-manager-'));
+    const binPath = path.join(fixturePath, 'bin');
+    const commandLog = path.join(fixturePath, 'commands.log');
+    fs.mkdirSync(binPath);
+
+    for (const command of ['npm', 'pnpm', 'yarn', 'npx']) {
+        writeExecutable(path.join(binPath, command), `#!/usr/bin/env bash
+printf '%s\\n' "$(basename \"$0\") $*" >> "$COMMAND_LOG"
+`);
+    }
+
+    for (const packageManager of ['npm', 'pnpm', 'yarn']) {
+        const result = spawnSync('bash', ['-c', 'source "$1"; pm_add "$2" example@1; nest_new "$2" .', 'bash', packageManagerHelpersPath, packageManager], {
+            cwd: fixturePath,
+            encoding: 'utf8',
+            env: { ...process.env, PATH: `${binPath}:${process.env.PATH}`, COMMAND_LOG: commandLog },
+        });
+        assert.equal(result.status, 0, result.stderr);
+    }
+
+    const commands = fs.readFileSync(commandLog, 'utf8');
+    assert.match(commands, /npm install example@1/);
+    assert.match(commands, /npx --yes @nestjs\/cli@12\.0\.0 new \. --package-manager npm --skip-git/);
+    assert.match(commands, /pnpm add example@1/);
+    assert.match(commands, /pnpm dlx @nestjs\/cli@12\.0\.0 new \. --package-manager pnpm --skip-git/);
+    assert.match(commands, /yarn add example@1/);
+    assert.match(commands, /yarn dlx @nestjs\/cli@12\.0\.0 new \. --package-manager yarn --skip-git/);
 });
 
 test('accepts project paths containing spaces without shell interpolation', () => {
@@ -313,7 +344,7 @@ function createExternalCommandFixture() {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-external-command-'));
     const binPath = path.join(fixturePath, 'bin');
     fs.mkdirSync(binPath);
-    writeExecutable(path.join(binPath, 'nest'), `#!/usr/bin/env bash
+    writeExecutable(path.join(binPath, 'npx'), `#!/usr/bin/env bash
 if [[ "\${NESTGEN_TEST_FAIL_NEST:-}" == "1" ]]; then exit 41; fi
 mkdir -p src
 cat > src/app.module.ts <<'EOF'
