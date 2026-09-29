@@ -556,8 +556,11 @@ test('generates TypeORM environment configuration and explicit migrations', () =
     });
     assert.equal(result.status, 0, result.stderr);
     const config = fs.readFileSync(path.join(fixturePath, 'src', 'database', 'typeorm.config.ts'), 'utf8');
+    const dataSource = fs.readFileSync(path.join(fixturePath, 'src', 'database', 'data-source.ts'), 'utf8');
     assert.match(config, /synchronize: false/);
     assert.match(config, /migrationsRun: false/);
+    assert.match(dataSource, /new DataSource/);
+    assert.match(dataSource, /src\/\*\*\/\*\.entity/);
     assert.equal(
         fs.existsSync(path.join(fixturePath, 'src', 'database', 'migrations', '0000000000000-InitialSchema.ts')),
         true,
