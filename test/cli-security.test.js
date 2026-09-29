@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
     parseModuleArgs,
+    parseCliArgs,
     resolveProjectPath,
     validateModuleName,
     validateOrm,
@@ -47,6 +48,33 @@ test('validates module names and supported ORMs', () => {
     }
 
     assert.throws(() => validateOrm('mongoose'));
+});
+
+test('parses scriptable CLI options and returns errors for invalid usage', () => {
+    assert.deepEqual(parseCliArgs(['module', 'order', '--orm', 'prisma', '--no-interactive', '--quiet']), {
+        command: 'module', positionals: ['order'], options: { orm: 'prisma', noInteractive: true, quiet: true, verbose: false, color: true, help: false, version: false },
+    });
+    assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
+    assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
+    assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
+});
+
+test('exposes stable help, version and error exit codes', () => {
+    const help = spawnSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' });
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, /Usage: nestgen/);
+
+    const version = spawnSync(process.execPath, [cliPath, '--version'], { encoding: 'utf8' });
+    assert.equal(version.status, 0);
+    assert.match(version.stdout, /0\.0\.7/);
+
+    const unknown = spawnSync(process.execPath, [cliPath, 'unknown'], { encoding: 'utf8' });
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /Commande inconnue/);
+
+    const nonInteractive = spawnSync(process.execPath, [cliPath, 'module', '--no-interactive'], { encoding: 'utf8' });
+    assert.equal(nonInteractive.status, 1);
+    assert.match(nonInteractive.stderr, /requiert un nom de module/);
 });
 
 test('normalizes resource names consistently across supported separators', () => {
