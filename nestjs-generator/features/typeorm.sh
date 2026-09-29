@@ -14,6 +14,52 @@ log_info "📦 Installation de TypeORM et PostgreSQL..."
 
 pm_add "$PM" @nestjs/typeorm@12 typeorm@0.3 pg@8
 
+mkdir -p src/database/migrations
+
+cat > src/database/typeorm.config.ts <<'EOF'
+import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Variable d'environnement manquante : ${name}`);
+  return value;
+}
+
+export function typeOrmOptions(): TypeOrmModuleOptions {
+  return {
+    type: 'postgres',
+    host: required('DATABASE_HOST'),
+    port: Number(process.env.DATABASE_PORT ?? 5432),
+    username: required('DATABASE_USER'),
+    password: required('DATABASE_PASSWORD'),
+    database: required('DATABASE_NAME'),
+    autoLoadEntities: true,
+    synchronize: false,
+    migrationsRun: false,
+    migrations: ['dist/database/migrations/*.js'],
+  };
+}
+EOF
+
+cat > src/database/migrations/0000000000000-InitialSchema.ts <<'EOF'
+import type { MigrationInterface, QueryRunner } from 'typeorm';
+
+export class InitialSchema0000000000000 implements MigrationInterface {
+  async up(_queryRunner: QueryRunner): Promise<void> {}
+  async down(_queryRunner: QueryRunner): Promise<void> {}
+}
+EOF
+
+if [ ! -e .env.example ]; then
+  cat > .env.example <<'EOF'
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_USER=postgres
+DATABASE_PASSWORD=change-me
+DATABASE_NAME=appdb
+EOF
+fi
+
 log_success "✅ TypeORM installé avec succès"
 
-log_info "💡 TypeORM sera automatiquement configuré dans app.module.ts"
+log_info "💡 TypeORM utilise src/database/typeorm.config.ts et des migrations explicites."

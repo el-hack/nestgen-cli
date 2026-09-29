@@ -18,6 +18,7 @@ import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
 const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
+const typeormScriptPath = path.resolve('nestjs-generator/features/typeorm.sh');
 const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
 const generateProjectScriptPath = path.resolve('nestjs-generator/generate_project.sh');
 const packageManagerHelpersPath = path.resolve('nestjs-generator/features/utils.sh');
@@ -343,7 +344,28 @@ test('keeps the TypeORM root configuration idempotent', () => {
 
     const appModule = fs.readFileSync(appModulePath, 'utf8');
     assert.equal((appModule.match(/TypeOrmModule\.forRoot/g) ?? []).length, 1);
+    assert.match(appModule, /TypeOrmModule\.forRootAsync\(\{ useFactory: typeOrmOptions \}\)/);
+    assert.doesNotMatch(appModule, /synchronize:\s*true/);
     assert.equal((decoratorImports(appModule).match(/\bCustomerModule\b/g) ?? []).length, 1);
+});
+
+test('generates TypeORM environment configuration and explicit migrations', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typeorm-config-'));
+    const binPath = path.join(fixturePath, 'bin');
+    fs.mkdirSync(binPath);
+    writeExecutable(path.join(binPath, 'npm'), '#!/usr/bin/env bash\nexit 0\n');
+
+    const result = spawnSync('bash', [typeormScriptPath, 'npm', 'sample'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${binPath}:${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const config = fs.readFileSync(path.join(fixturePath, 'src', 'database', 'typeorm.config.ts'), 'utf8');
+    assert.match(config, /synchronize: false/);
+    assert.match(config, /migrationsRun: false/);
+    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'database', 'migrations', '0000000000000-InitialSchema.ts')), true);
+    assert.match(fs.readFileSync(path.join(fixturePath, '.env.example'), 'utf8'), /DATABASE_PASSWORD=change-me/);
 });
 
 test('preserves an existing TypeORM root connection during module generation', () => {
@@ -387,6 +409,12 @@ test('binds repository ports through explicit Nest injection tokens', () => {
         assert.match(generatedModule, new RegExp(`provide: ${token[1]},`));
         assert.match(generatedModule, new RegExp(`useClass: ${repositoryClass[1]},`));
         assert.doesNotMatch(generatedModule, new RegExp(`\\n    ${repositoryClass[1]},`));
+        if (orm === 'typeorm') {
+            const handler = fs.readFileSync(path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'), 'utf8');
+            const repository = fs.readFileSync(path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order.typeorm.repository.ts'), 'utf8');
+            assert.match(handler, /new Order\(undefined, command\.name, command\.email\)/);
+            assert.match(repository, /this\.repo\.create\(\{\n      name: order\.name,/);
+        }
     }
 });
 

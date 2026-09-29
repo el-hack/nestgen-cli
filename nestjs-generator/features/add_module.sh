@@ -72,7 +72,7 @@ mkdir -p "$MODULE_DIR"/{core/{application/{commands,events,queries},domain/{enti
 cat > "$MODULE_DIR/core/domain/entities/${NAME}.entity.ts" <<EOF
 export class $PASCAL {
   constructor(
-    public readonly id: string,
+    public readonly id: string | undefined,
     public name: string,
     public email: string,
   ) {}
@@ -113,7 +113,7 @@ export class Create${PASCAL}Handler implements ICommandHandler<Create${PASCAL}Co
   ) {}
 
   async execute(command: Create${PASCAL}Command): Promise<string> {
-    const $CAMEL = new $PASCAL(Date.now().toString(), command.name, command.email);
+    const $CAMEL = new $PASCAL(undefined, command.name, command.email);
     const saved = await this.repo.save($CAMEL);
     return saved.id;
   }
@@ -189,7 +189,10 @@ export class ${PASCAL}TypeOrmRepository implements ${PASCAL}RepositoryPort {
   constructor(@InjectRepository(${PASCAL}Entity) private readonly repo: Repository<${PASCAL}Entity>) {}
 
   async save(${CAMEL}: $PASCAL): Promise<$PASCAL> {
-    const entity = this.repo.create(${CAMEL});
+    const entity = this.repo.create({
+      name: ${CAMEL}.name,
+      email: ${CAMEL}.email,
+    });
     const saved = await this.repo.save(entity);
     return new $PASCAL(saved.id, saved.name, saved.email);
   }
