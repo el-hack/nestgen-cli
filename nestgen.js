@@ -8,6 +8,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { inspectProject } from './nestjs-generator/features/preflight.mjs';
 import { generateModule } from './dist/engine/module-generator.js';
+import { generateResource } from './dist/engine/resource-generator.js';
+import { parseResourceFields } from './dist/engine/resource-spec.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -100,6 +102,12 @@ export function parseCliArgs(args) {
             if (!value || value.startsWith('-')) throw new Error('--orm requiert une valeur.');
             options.orm = value;
         } else if (argument.startsWith('--orm=')) options.orm = argument.slice(6);
+        else if (argument === '--fields') options.fields = args[++index];
+        else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
+        else if (argument === '--route') options.route = args[++index];
+        else if (argument.startsWith('--route=')) options.route = argument.slice(8);
+        else if (argument === '--table') options.table = args[++index];
+        else if (argument.startsWith('--table=')) options.table = argument.slice(8);
         else if (argument === '--no-interactive') options.noInteractive = true;
         else if (argument === '--quiet') options.quiet = true;
         else if (argument === '--verbose') options.verbose = true;
@@ -309,6 +317,21 @@ async function runModuleGeneration(parsed) {
     generateModule(process.cwd(), moduleName, orm);
 }
 
+function runResourceGeneration(parsed) {
+    const name = validateModuleName(parsed.positionals[0] ?? '');
+    if (!parsed.options.fields) throw new Error('resource requiert --fields champ:type[,champ:type].');
+    const fields = parseResourceFields(parsed.options.fields.split(',').filter(Boolean));
+    const route = parsed.options.route ?? `${name}s`;
+    const table = parsed.options.table ?? `${name}s`;
+    if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
+        throw new Error('Route ou table invalide.');
+    if (parsed.options.dryRun) {
+        console.log(JSON.stringify({ operation: 'resource', name, route, table, fields }, null, 2));
+        return;
+    }
+    generateResource(process.cwd(), { name, route, table, fields });
+}
+
 function printUsage() {
     console.log(
         `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --dry-run                    Affiche le plan sans écrire`,
@@ -366,6 +389,10 @@ export async function main(args = process.argv.slice(2)) {
 
         case 'module':
             await runModuleGeneration(parsed);
+            break;
+
+        case 'resource':
+            runResourceGeneration(parsed);
             break;
 
         case 'doctor':

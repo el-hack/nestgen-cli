@@ -15,6 +15,8 @@ import {
 import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
 import { generateModule } from '../dist/engine/module-generator.js';
+import { parseResourceFields, prismaType, typescriptType } from '../dist/engine/resource-spec.js';
+import { generateResource } from '../dist/engine/resource-generator.js';
 
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
@@ -55,6 +57,32 @@ test('validates module names and supported ORMs', () => {
     }
 
     assert.throws(() => validateOrm('mongoose'));
+});
+
+test('parses a reusable resource field contract', () => {
+    const fields = parseResourceFields(['sku:string!', 'price:number', 'available:boolean', 'expiresAt:date?']);
+    assert.deepEqual(
+        fields.map((field) => field.name),
+        ['sku', 'price', 'available', 'expiresAt'],
+    );
+    assert.equal(typescriptType(fields[1]), 'number');
+    assert.equal(prismaType(fields[0]), 'String @unique');
+    assert.equal(prismaType(fields[3]), 'DateTime?');
+    assert.throws(() => parseResourceFields(['id:uuid']));
+    assert.throws(() => parseResourceFields(['price:number', 'price:string']));
+});
+
+test('generates a product resource from its business fields', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-'));
+    const fields = parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']);
+    generateResource(fixturePath, { name: 'product', route: 'catalog/products', table: 'catalog_products', fields });
+    const root = path.join(fixturePath, 'src', 'app', 'product');
+    assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price: number/);
+    assert.match(
+        fs.readFileSync(path.join(root, 'persistence', 'product.prisma'), 'utf8'),
+        /@@map\("catalog_products"\)/,
+    );
+    assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
 });
 
 test('parses scriptable CLI options and returns errors for invalid usage', () => {
