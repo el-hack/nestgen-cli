@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
     parseModuleArgs,
     parseCliArgs,
+    createModulePlan,
     resolveProjectPath,
     validateModuleName,
     validateOrm,
@@ -52,11 +53,19 @@ test('validates module names and supported ORMs', () => {
 
 test('parses scriptable CLI options and returns errors for invalid usage', () => {
     assert.deepEqual(parseCliArgs(['module', 'order', '--orm', 'prisma', '--no-interactive', '--quiet']), {
-        command: 'module', positionals: ['order'], options: { orm: 'prisma', noInteractive: true, quiet: true, verbose: false, color: true, help: false, version: false },
+        command: 'module', positionals: ['order'], options: { orm: 'prisma', noInteractive: true, quiet: true, verbose: false, color: true, help: false, version: false, dryRun: false },
     });
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
     assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
+});
+
+test('creates a deterministic module dry-run plan', () => {
+    const first = createModulePlan('/project', 'order-item', 'typeorm');
+    const second = createModulePlan('/project', 'order-item', 'typeorm');
+    assert.deepEqual(first, second);
+    assert.equal(first.files.includes('src/app/order-item/order-item.module.ts'), true);
+    assert.match(first.mutations.join('\n'), /TypeORM racine/);
 });
 
 test('exposes stable help, version and error exit codes', () => {

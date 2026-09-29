@@ -6,6 +6,7 @@ import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { inspectProject } from './nestjs-generator/features/preflight.mjs';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -73,7 +74,7 @@ export function parseModuleArgs(args) {
 }
 
 export function parseCliArgs(args) {
-    const options = { orm: 'typeorm', noInteractive: false, quiet: false, verbose: false, color: true, help: false, version: false };
+    const options = { orm: 'typeorm', noInteractive: false, quiet: false, verbose: false, color: true, help: false, version: false, dryRun: false };
     const positionals = [];
     for (let index = 0; index < args.length; index += 1) {
         const argument = args[index];
@@ -85,6 +86,7 @@ export function parseCliArgs(args) {
         else if (argument === '--no-interactive') options.noInteractive = true;
         else if (argument === '--quiet') options.quiet = true;
         else if (argument === '--verbose') options.verbose = true;
+        else if (argument === '--dry-run') options.dryRun = true;
         else if (argument === '--no-color') options.color = false;
         else if (argument === '--help' || argument === '-h') options.help = true;
         else if (argument === '--version' || argument === '-V') options.version = true;
@@ -92,6 +94,29 @@ export function parseCliArgs(args) {
         else positionals.push(argument);
     }
     return { command: positionals.shift(), positionals, options };
+}
+
+export function createModulePlan(projectRoot, moduleName, orm) {
+    const normalizedName = validateModuleName(moduleName);
+    const normalizedOrm = validateOrm(orm);
+    const resourceRoot = `src/app/${normalizedName}`;
+    return {
+        operation: 'module', module: normalizedName, orm: normalizedOrm, projectRoot,
+        files: [
+            `${resourceRoot}/core/domain/entities/${normalizedName}.entity.ts`,
+            `${resourceRoot}/core/domain/ports/${normalizedName}.repository.ts`,
+            `${resourceRoot}/core/application/commands/create-${normalizedName}.command.ts`,
+            `${resourceRoot}/core/application/commands/create-${normalizedName}.handler.ts`,
+            `${resourceRoot}/interfaces/dtos/create-${normalizedName}.dto.ts`,
+            `${resourceRoot}/interfaces/controllers/${normalizedName}.controller.ts`,
+            `${resourceRoot}/${normalizedName}.module.ts`,
+        ],
+        mutations: [
+            'Ajoute le module dans @Module({ imports }) de src/app.module.ts.',
+            'Ajoute CqrsModule dans src/app.module.ts si nécessaire.',
+            ...(normalizedOrm === 'typeorm' ? ['Ajoute la configuration TypeORM racine seulement si elle est absente.'] : []),
+        ],
+    };
 }
 
 export function runBashScript(scriptPath, args = [], env = {}, quiet = false) {
@@ -249,18 +274,33 @@ async function runModuleGeneration(parsed) {
         throw new Error('Aucun projet NestJS détecté dans ce dossier. Lance cette commande depuis un projet NestJS.');
     }
 
+    if (parsed.options.dryRun) {
+        inspectProject(process.cwd(), orm);
+        console.log(JSON.stringify(createModulePlan(process.cwd(), moduleName, orm), null, 2));
+        return;
+    }
+
     if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
     runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], { NESTGEN_VERBOSE: parsed.options.verbose ? '1' : '0' }, parsed.options.quiet);
 }
 
 function printUsage() {
-    console.log(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs`);
+    console.log(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --dry-run                    Affiche le plan sans écrire`);
 }
 
 function runDoctor() {
-    const valid = fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT);
-    console.log(valid ? 'NestGen est prêt.' : 'NestGen est incomplet.');
-    if (!valid) throw new Error('Des scripts de génération sont introuvables.');
+    const checks = [
+        ['Node.js', process.versions.node, Number(process.versions.node.split('.')[0]) >= 24, 'Installe Node.js 24 LTS ou une version supportée.'],
+        ['Scripts NestGen', `${GENERATE_SCRIPT}, ${ADD_MODULE_SCRIPT}`, fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT), 'Réinstalle NestGen.'],
+    ];
+    for (const [name, detail, valid, advice] of checks) console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
+    try {
+        const project = inspectProject(process.cwd(), 'typeorm');
+        console.log(`OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`);
+    } catch (error) {
+        console.log(`INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`);
+    }
+    if (checks.some(([, , valid]) => !valid)) throw new Error('Des prérequis NestGen sont manquants.');
 }
 
 // ────── Entrée CLI
