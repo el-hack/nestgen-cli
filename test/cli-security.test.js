@@ -10,6 +10,7 @@ import {
     validateModuleName,
     validateOrm,
 } from '../nestgen.js';
+import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
@@ -31,6 +32,24 @@ test('validates module names and supported ORMs', () => {
     }
 
     assert.throws(() => validateOrm('mongoose'));
+});
+
+test('normalizes resource names consistently across supported separators', () => {
+    assert.deepEqual(describeResource('user'), {
+        name: 'user', pascal: 'User', camel: 'user', plural: 'users', route: 'users', table: 'users',
+    });
+    assert.deepEqual(describeResource('User'), {
+        name: 'user', pascal: 'User', camel: 'user', plural: 'users', route: 'users', table: 'users',
+    });
+    assert.deepEqual(describeResource('order-item'), {
+        name: 'order-item', pascal: 'OrderItem', camel: 'orderItem', plural: 'order-items', route: 'order-items', table: 'order_items',
+    });
+    assert.deepEqual(describeResource('order_item'), {
+        name: 'order-item', pascal: 'OrderItem', camel: 'orderItem', plural: 'order-items', route: 'order-items', table: 'order_items',
+    });
+    assert.deepEqual(describeResource('category', { plural: 'categories', route: 'catalog', table: 'catalog_entries' }), {
+        name: 'category', pascal: 'Category', camel: 'category', plural: 'categories', route: 'catalog', table: 'catalog_entries',
+    });
 });
 
 test('accepts project paths containing spaces without shell interpolation', () => {
@@ -258,6 +277,32 @@ test('binds repository ports through explicit Nest injection tokens', () => {
         assert.match(generatedModule, new RegExp(`useClass: ${repositoryClass[1]},`));
         assert.doesNotMatch(generatedModule, new RegExp(`\\n    ${repositoryClass[1]},`));
     }
+});
+
+test('uses portable resource names for generated classes, routes and tables', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-name-'));
+    const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+    fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+
+    const result = spawnSync('bash', [addModuleScriptPath, 'order_item', 'typeorm'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+        env: {
+            ...process.env,
+            RESOURCE_ROUTE: 'purchase-orders',
+            RESOURCE_TABLE: 'purchase_orders',
+        },
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const moduleRoot = path.join(fixturePath, 'src', 'app', 'order-item');
+    const entity = fs.readFileSync(path.join(moduleRoot, 'core', 'domain', 'entities', 'order-item.entity.ts'), 'utf8');
+    const controller = fs.readFileSync(path.join(moduleRoot, 'interfaces', 'controllers', 'order-item.controller.ts'), 'utf8');
+    const ormEntity = fs.readFileSync(path.join(moduleRoot, 'infrastructure', 'persistences', 'repositories', 'order-item.orm.ts'), 'utf8');
+    assert.match(entity, /export class OrderItem/);
+    assert.match(controller, /@Controller\('purchase-orders'\)/);
+    assert.match(ormEntity, /@Entity\('purchase_orders'\)/);
 });
 
 function writeExecutable(filePath, content) {
