@@ -9,11 +9,11 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typeorm-e2e-'));
 const npmCache = path.join(root, 'npm-cache');
 const postgresContainer = `nestgen-typeorm-e2e-${process.pid}-${Date.now()}`;
 
-function run(command, args, cwd = root) {
+function run(command, args, cwd = root, environment = {}) {
     const result = spawnSync(command, args, {
         cwd,
         encoding: 'utf8',
-        env: { ...process.env, npm_config_cache: npmCache, npm_config_update_notifier: 'false' },
+        env: { ...process.env, ...environment, npm_config_cache: npmCache, npm_config_update_notifier: 'false' },
     });
     if (result.error) throw result.error;
     if (result.status !== 0)
@@ -112,7 +112,7 @@ try {
         path.join(root, 'exercise.mjs'),
         `import 'reflect-metadata';\nimport { ValidationPipe } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport request from 'supertest';\nimport { AppModule } from './build/app.module.js';\n\nlet step = 'initialisation de NestJS';\nconst app = await NestFactory.create(AppModule, { logger: false });\napp.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));\nawait app.init();\ntry {\n    const api = request(app.getHttpServer());\n    step = 'création de la ressource';\n    const created = await api.post('/catalog/products').send({ sku: 'sku-1', price: 12.5, published: true }).expect(201);\n    if (!created.body.id || created.body.price !== 12.5) throw new Error('La création TypeORM ne retourne pas la ressource persistée.');\n    step = 'validation HTTP 400';\n    await api.post('/catalog/products').send({ sku: 'sku-2', price: 'invalid', published: true }).expect(400);\n    step = 'conflit HTTP 409';\n    await api.post('/catalog/products').send({ sku: 'sku-1', price: 15, published: false }).expect(409);\n    step = 'borne de pagination';\n    await api.get('/catalog/products?limit=101').expect(400);\n    step = 'lecture paginée';\n    const listed = await api.get('/catalog/products?page=1&limit=1').expect(200);\n    if (listed.body.data.length !== 1 || listed.body.limit !== 1) throw new Error('La pagination ne renvoie pas le contrat attendu.');\n    step = 'mise à jour';\n    await api.patch('/catalog/products/' + created.body.id).send({ price: 20 }).expect(200);\n    step = 'lecture après mise à jour';\n    const found = await api.get('/catalog/products/' + created.body.id).expect(200);\n    if (found.body.price !== 20) throw new Error('La mise à jour TypeORM n’est pas persistée.');\n    step = 'suppression';\n    await api.delete('/catalog/products/' + created.body.id).expect(204);\n    step = 'vérification HTTP 404';\n    await api.get('/catalog/products/' + created.body.id).expect(404);\n} catch (error) {\n    console.error('TypeORM HTTP integration failed during ' + step + ':', error);\n    throw error;\n} finally {\n    await app.close();\n}\n`,
     );
-    run(process.execPath, ['exercise.mjs']);
+    run(process.execPath, ['exercise.mjs'], root, { DATABASE_HOST: '127.0.0.1', DATABASE_PORT: port });
 } finally {
     spawnSync('docker', ['rm', '--force', postgresContainer], { encoding: 'utf8' });
     if (process.env.NESTGEN_KEEP_TYPEORM_E2E) console.error(`TypeORM integration workspace: ${root}`);
