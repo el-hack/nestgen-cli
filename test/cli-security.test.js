@@ -14,6 +14,7 @@ import {
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
 const dockerScriptPath = path.resolve('nestjs-generator/features/docker.sh');
+const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
 
 test('validates module names and supported ORMs', () => {
     assert.equal(validateModuleName('Order-Item'), 'order-item');
@@ -150,4 +151,81 @@ test('refuses Docker file collisions and source symlinks without changing their 
     });
     assert.equal(symlinkAttempt.status, 1);
     assert.equal(fs.readdirSync(outsidePath).length, 0);
+});
+
+function writeGeneratedModule(fixturePath, name, className) {
+    const modulePath = path.join(fixturePath, 'src', 'app', name, `${name}.module.ts`);
+    fs.mkdirSync(path.dirname(modulePath), { recursive: true });
+    fs.writeFileSync(modulePath, `export class ${className} {}\n`);
+}
+
+function decoratorImports(appModule) {
+    return appModule.match(/@Module\s*\(\s*\{[\s\S]*?imports\s*:\s*\[([\s\S]*?)\]/)?.[1] ?? '';
+}
+
+test('registers a generated module in AppModule exactly once', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-'));
+    const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+    fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [],\n})\nexport class AppModule {}\n");
+    writeGeneratedModule(fixturePath, 'order', 'OrderModule');
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = spawnSync('bash', [injectModuleScriptPath, 'order', 'prisma'], {
+            cwd: fixturePath,
+            encoding: 'utf8',
+        });
+        assert.equal(result.status, 0, result.stderr);
+    }
+
+    const appModule = fs.readFileSync(appModulePath, 'utf8');
+    const imports = decoratorImports(appModule);
+    assert.match(appModule, /import \{ OrderModule \} from '\.\/app\/order\/order\.module';/);
+    assert.equal((imports.match(/\bOrderModule\b/g) ?? []).length, 1);
+    assert.equal((imports.match(/\bCqrsModule\b/g) ?? []).length, 1);
+});
+
+test('updates a multiline AppModule and leaves unsupported forms untouched', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-multiline-'));
+    const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+    fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n\n@Module({\n  imports: [\n    ExistingModule,\n  ],\n})\nexport class AppModule {}\n");
+    writeGeneratedModule(fixturePath, 'invoice', 'InvoiceModule');
+
+    const supported = spawnSync('bash', [injectModuleScriptPath, 'invoice', 'prisma'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(supported.status, 0, supported.stderr);
+    assert.match(decoratorImports(fs.readFileSync(appModulePath, 'utf8')), /ExistingModule,[\s\S]*CqrsModule,[\s\S]*InvoiceModule/);
+
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ controllers: [] })\nexport class AppModule {}\n");
+    const before = fs.readFileSync(appModulePath, 'utf8');
+    const unsupported = spawnSync('bash', [injectModuleScriptPath, 'invoice', 'prisma'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(unsupported.status, 1);
+    assert.match(unsupported.stderr, /tableau imports/);
+    assert.equal(fs.readFileSync(appModulePath, 'utf8'), before);
+});
+
+test('keeps the TypeORM root configuration idempotent', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-app-module-typeorm-'));
+    const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+    fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+    fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+    writeGeneratedModule(fixturePath, 'customer', 'CustomerModule');
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = spawnSync('bash', [injectModuleScriptPath, 'customer', 'typeorm'], {
+            cwd: fixturePath,
+            encoding: 'utf8',
+        });
+        assert.equal(result.status, 0, result.stderr);
+    }
+
+    const appModule = fs.readFileSync(appModulePath, 'utf8');
+    assert.equal((appModule.match(/TypeOrmModule\.forRoot/g) ?? []).length, 1);
+    assert.equal((decoratorImports(appModule).match(/\bCustomerModule\b/g) ?? []).length, 1);
 });
