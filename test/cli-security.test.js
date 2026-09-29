@@ -74,15 +74,22 @@ test('parses a reusable resource field contract', () => {
 
 test('generates a product resource from its business fields', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
     const fields = parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']);
     generateResource(fixturePath, { name: 'product', route: 'catalog/products', table: 'catalog_products', fields });
     const root = path.join(fixturePath, 'src', 'app', 'product');
-    assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price: number/);
+    assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price!?: number/);
     assert.match(
         fs.readFileSync(path.join(root, 'persistence', 'product.prisma'), 'utf8'),
         /@@map\("catalog_products"\)/,
     );
     assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
+    assert.match(fs.readFileSync(path.join(root, 'product.module.ts'), 'utf8'), /TypeOrmModule\.forFeature/);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
 });
 
 test('parses scriptable CLI options and returns errors for invalid usage', () => {
