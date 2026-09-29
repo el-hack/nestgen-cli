@@ -3,6 +3,7 @@
     "version": "0.0.7",
     "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
     "files": [
+        "dist",
         "nestgen.js",
         "nestjs-generator"
     ],
@@ -30,20 +31,24 @@
     },
     "packageManager": "npm@11.0.0",
     "scripts": {
-        "check": "eslint .",
+        "build": "tsc -p tsconfig.json",
+        "check": "npm run typecheck && eslint .",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "prepack": "npm run check && npm run format:check && npm test",
+        "prepack": "npm run build && npm run check && npm run format:check && npm test",
         "test": "node --test",
-        "test:package": "node scripts/package-smoke.mjs"
+        "test:package": "node scripts/package-smoke.mjs",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "licenses": "MIT",
     "dependencies": {
         "chalk": "^5.3.0",
-        "inquirer": "^9.0.0"
+        "inquirer": "^9.0.0",
+        "typescript": "^5.9.3"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.5",
+        "@types/node": "^24.19.0",
         "eslint": "^9.39.5",
         "prettier": "^3.9.9"
     }
