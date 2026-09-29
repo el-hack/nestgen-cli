@@ -2,6 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArchitectureProfile } from './architecture-profile.js';
 export const configFileName = 'nestgen.config.json';
+export const defaultConfig = {
+    version: 1,
+    orm: 'typeorm',
+    profile: 'simple',
+    sourceRoot: 'src',
+    packageManager: 'npm',
+    templateVersion: 1,
+};
+export function loadConfigIfPresent(projectRoot) {
+    return fs.existsSync(path.join(projectRoot, configFileName)) ? loadConfig(projectRoot) : undefined;
+}
 export function loadConfig(projectRoot) {
     const filePath = path.join(projectRoot, configFileName);
     const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));

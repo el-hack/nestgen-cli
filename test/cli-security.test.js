@@ -98,6 +98,8 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
         positionals: ['order'],
         options: {
             orm: 'prisma',
+            profile: undefined,
+            packageManager: undefined,
             noInteractive: true,
             quiet: true,
             verbose: false,
@@ -110,6 +112,33 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
     assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
+});
+
+test('applies the advanced resource profile and versioned project configuration', () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-profile-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    const init = spawnSync(process.execPath, [cliPath, 'config', 'init', '--profile=advanced'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
+    assert.equal(init.status, 0, init.stderr);
+    const config = JSON.parse(fs.readFileSync(path.join(fixturePath, 'nestgen.config.json'), 'utf8'));
+    assert.equal(config.profile, 'advanced');
+    generateResource(fixturePath, {
+        name: 'order',
+        route: 'orders',
+        table: 'orders',
+        fields: parseResourceFields(['reference:string!']),
+        profile: config.profile,
+    });
+    const root = path.join(fixturePath, 'src', 'app', 'order');
+    assert.equal(fs.existsSync(path.join(root, 'domain', 'order.repository.port.ts')), true);
+    assert.match(fs.readFileSync(path.join(root, 'order.controller.ts'), 'utf8'), /OrderService/);
+    assert.match(fs.readFileSync(path.join(root, 'order.module.ts'), 'utf8'), /OrderRepositoryToken/);
 });
 
 test('creates a deterministic module dry-run plan', () => {
