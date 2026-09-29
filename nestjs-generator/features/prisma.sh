@@ -9,13 +9,22 @@ source "$FEATURES_PATH/logger.sh"
 PM=$1
 APP_NAME=$2
 
+if [ -e prisma/schema.prisma ]; then
+  echo "❌ prisma/schema.prisma existe déjà. Aucune configuration Prisma n'a été remplacée."
+  exit 1
+fi
+
 $PM install prisma --save-dev
 $PM install @prisma/client
 npx prisma init
 
+if [ ! -e .env ]; then
 cat > .env <<EOF
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/$APP_NAME"
 EOF
+else
+  echo "ℹ️  .env existe déjà et a été conservé."
+fi
 
 cat > prisma/schema.prisma <<EOF
 generator client {
