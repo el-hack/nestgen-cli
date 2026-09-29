@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # ────── INIT ──────
-set -e
+set -euo pipefail
 
-FEATURES_PATH="$(dirname "$0")/features"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FEATURES_PATH="$SCRIPT_DIR/features"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
@@ -16,6 +17,20 @@ done
 debug_log() {
   if [ "$DEBUG" = true ]; then
     echo "🐞 [DEBUG] $1" | tee /dev/tty
+  fi
+}
+
+run_step() {
+  local step=$1
+  shift
+
+  log_info "$step"
+  if "$@"; then
+    return 0
+  else
+    local status=$?
+    log_error "$step a échoué (code $status)."
+    exit "$status"
   fi
 }
 
@@ -36,7 +51,7 @@ debug_log "Install command : $PM $INSTALL_CMD"
 # ────── Vérification de Nest CLI ──────
 if ! command -v nest &> /dev/null; then
   log_warn "Nest CLI non installée. Installation avec npm..."
-  npm install -g @nestjs/cli
+  run_step "Installation de Nest CLI" npm install -g @nestjs/cli
 fi
 
 # ────── Création du projet ──────
@@ -47,23 +62,19 @@ cd "$FULL_PATH" || {
   exit 1
 }
 
-nest new . --package-manager "$PM" --skip-git || {
-  log_error "Échec de nest new"
-  exit 1
-}
+run_step "Création du projet NestJS" nest new . --package-manager "$PM" --skip-git
 
-log_info "Installation des packages communs..."
-$PM $INSTALL_CMD @nestjs/cqrs class-validator class-transformer @nestjs/config
+run_step "Installation des packages communs" "$PM" "$INSTALL_CMD" @nestjs/cqrs class-validator class-transformer @nestjs/config
 
 # ────── ORM SETUP ──────
 case "$ORM" in
   typeorm)
     debug_log "Appel de typeorm.sh"
-    bash "$FEATURES_PATH/typeorm.sh" "$PM" "$APP_NAME"
+    run_step "Configuration de TypeORM" bash "$FEATURES_PATH/typeorm.sh" "$PM" "$APP_NAME"
     ;;
   prisma)
     debug_log "Appel de prisma.sh"
-    bash "$FEATURES_PATH/prisma.sh" "$PM" "$APP_NAME"
+    run_step "Configuration de Prisma" bash "$FEATURES_PATH/prisma.sh" "$PM" "$APP_NAME"
     ;;
   *)
     log_error "❌ ORM non reconnu : $ORM"
@@ -73,62 +84,25 @@ esac
 
 # ────── Docker, Swagger, Git ──────
 WITH_DOCKER=${WITH_DOCKER:-$(read -p "🐳 Activer Docker ? (y/n) : " tmp && echo "$tmp")}
-[ "$WITH_DOCKER" = "y" ] && bash "$FEATURES_PATH/docker.sh" "$APP_NAME"
+if [ "$WITH_DOCKER" = "y" ]; then
+  run_step "Configuration Docker" bash "$FEATURES_PATH/docker.sh" "$APP_NAME"
+fi
 
 WITH_SWAGGER=${WITH_SWAGGER:-$(read -p "📚 Activer Swagger ? (y/n) : " tmp && echo "$tmp")}
-[ "$WITH_SWAGGER" = "y" ] && bash "$FEATURES_PATH/swagger.sh" "$PM"
+if [ "$WITH_SWAGGER" = "y" ]; then
+  run_step "Configuration Swagger" bash "$FEATURES_PATH/swagger.sh" "$PM"
+fi
 
 WITH_GIT=${WITH_GIT:-$(read -p "🔃 Initialiser Git ? (y/n) : " tmp && echo "$tmp")}
-[ "$WITH_GIT" = "y" ] && bash "$FEATURES_PATH/git.sh"
+if [ "$WITH_GIT" = "y" ]; then
+  run_step "Initialisation Git" bash "$FEATURES_PATH/git.sh"
+fi
 
 # ────── Modules à générer ──────
-MODULES=${MODULES:-$(read -p "👤 Modules à générer (séparés par espaces) : " tmp && echo "$tmp")}
+MODULES=${MODULES-$(read -p "👤 Modules à générer (séparés par espaces) : " tmp && echo "$tmp")}
 for MODULE in $MODULES; do
   debug_log "Génération du module $MODULE"
-  bash "$FEATURES_PATH/add_module.sh" "$MODULE" "$ORM"
-done
-
-# ────── Injection dans app.module.ts ──────
-APP_MODULE="src/app.module.ts"
-
-# CqrsModule
-if ! grep -q "CqrsModule" "$APP_MODULE"; then
-  sed -i '' "1i\\
-import { CqrsModule } from '@nestjs/cqrs';
-" "$APP_MODULE"
-  sed -i '' "s|imports: \[|imports: [CqrsModule, |" "$APP_MODULE"
-  echo "✅ CqrsModule injecté"
-fi
-
-# TypeOrmModule
-if [ "$ORM" = "typeorm" ]; then
-  if ! grep -q "TypeOrmModule" "$APP_MODULE"; then
-    sed -i '' "1i\\
-import { TypeOrmModule } from '@nestjs/typeorm';
-" "$APP_MODULE"
-    echo "✅ Import de TypeOrmModule ajouté"
-  fi
-
-  if ! grep -q "TypeOrmModule.forRoot" "$APP_MODULE"; then
-    sed -i '' -E 's/(imports: \[[^]]*)(])/\1\
-    TypeOrmModule.forRoot({\
-      type: '\''postgres'\'',\
-      host: '\''localhost'\'',\
-      port: 5432,\
-      username: '\''postgres'\'',\
-      password: '\''postgres'\'',\
-      database: '\''appdb'\'',\
-      synchronize: true,\
-      autoLoadEntities: true,\
-    }), \2/g' "$APP_MODULE"
-    echo "✅ TypeOrmModule.forRoot injecté"
-  fi
-fi
-
-# Modules générés
-for MODULE in $MODULES; do
-  debug_log "Injection de $MODULE dans app.module.ts"
-  bash "$FEATURES_PATH/inject_module_to_app.sh" "$MODULE" "$ORM"
+  run_step "Génération du module $MODULE" bash "$FEATURES_PATH/add_module.sh" "$MODULE" "$ORM"
 done
 
 # ────── Résumé final ──────
@@ -137,7 +111,7 @@ log_success "✅ Projet NestJS \"$APP_NAME\" généré avec succès 🎉"
 echo "📁 Localisation : $FULL_PATH"
 echo "📦 Package manager : $PM"
 echo "🧠 ORM : $ORM"
-[ "$WITH_DOCKER" = "y" ] && echo "🐳 Docker activé"
-[ "$WITH_SWAGGER" = "y" ] && echo "📚 Swagger activé"
-[ "$WITH_GIT" = "y" ] && echo "🔃 Git initialisé"
-[ -n "$MODULES" ] && echo "📦 Modules générés : $MODULES"
+if [ "$WITH_DOCKER" = "y" ]; then echo "🐳 Docker activé"; fi
+if [ "$WITH_SWAGGER" = "y" ]; then echo "📚 Swagger activé"; fi
+if [ "$WITH_GIT" = "y" ]; then echo "🔃 Git initialisé"; fi
+if [ -n "$MODULES" ]; then echo "📦 Modules générés : $MODULES"; fi

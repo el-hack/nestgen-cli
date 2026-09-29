@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 
 # ────── Charger les helpers ──────
-FEATURES_PATH="$(dirname "$0")/features"
+FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-APP_NAME=$1
+APP_NAME=${1:?Nom_application_requis}
 
 if [ -e Dockerfile ] || [ -e docker-compose.yml ]; then
   echo "❌ Dockerfile ou docker-compose.yml existe déjà. Aucune configuration Docker n'a été remplacée."

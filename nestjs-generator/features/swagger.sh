@@ -1,12 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # ────── Charger les helpers ──────
-FEATURES_PATH="$(dirname "$0")/features"
+FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-PM=$1
+PM=${1:?Package manager requis}
 
 $PM install @nestjs/swagger swagger-ui-express
 

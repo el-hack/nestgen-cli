@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # ────── Charger les helpers ──────
-FEATURES_PATH="$(dirname "$0")/features"
+FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 

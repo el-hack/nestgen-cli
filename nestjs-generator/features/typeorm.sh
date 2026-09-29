@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-PM=$1
-APP_NAME=$2
+set -euo pipefail
+
+PM=${1:?Package manager requis}
+APP_NAME=${2:?Nom_application_requis}
 
 # ────── Charger les helpers ──────
 FEATURES_PATH="$(dirname "$0")"

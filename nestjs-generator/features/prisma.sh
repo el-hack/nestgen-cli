@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # ────── Charger les helpers ──────
-FEATURES_PATH="$(dirname "$0")/features"
+FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-PM=$1
-APP_NAME=$2
+PM=${1:?Package manager requis}
+APP_NAME=${2:?Nom_application_requis}
 
 if [ -e prisma/schema.prisma ]; then
   echo "❌ prisma/schema.prisma existe déjà. Aucune configuration Prisma n'a été remplacée."
