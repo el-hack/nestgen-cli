@@ -29,6 +29,7 @@ NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
 PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\U\2/g' | sed -E 's/[-_]//g')
 
 CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
+REPOSITORY_TOKEN="${PASCAL}RepositoryToken"
 
 PROJECT_ROOT="$(pwd -P)"
 SOURCE_ROOT="$PROJECT_ROOT/src/app"
@@ -63,6 +64,8 @@ EOF
 cat > "$MODULE_DIR/core/domain/ports/${NAME}.repository.ts" <<EOF
 import { $PASCAL } from '../entities/${NAME}.entity';
 
+export const ${REPOSITORY_TOKEN} = Symbol('${PASCAL}RepositoryPort');
+
 export interface ${PASCAL}RepositoryPort {
   save(${CAMEL}: $PASCAL): Promise<$PASCAL>;
   findById(id: string): Promise<$PASCAL | null>;
@@ -78,14 +81,17 @@ EOF
 
 # ────── Command Handler ──────
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.handler.ts" <<EOF
+import { Inject } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from './create-${NAME}.command';
 import { $PASCAL } from '../../domain/entities/${NAME}.entity';
-import { ${PASCAL}RepositoryPort } from '../../domain/ports/${NAME}.repository';
+import { ${PASCAL}RepositoryPort, ${REPOSITORY_TOKEN} } from '../../domain/ports/${NAME}.repository';
 
 @CommandHandler(Create${PASCAL}Command)
 export class Create${PASCAL}Handler implements ICommandHandler<Create${PASCAL}Command> {
-  constructor(private readonly repo: ${PASCAL}RepositoryPort) {}
+  constructor(
+    @Inject(${REPOSITORY_TOKEN}) private readonly repo: ${PASCAL}RepositoryPort,
+  ) {}
 
   async execute(command: Create${PASCAL}Command): Promise<string> {
     const $CAMEL = new $PASCAL(Date.now().toString(), command.name, command.email);
@@ -179,7 +185,7 @@ EOF
   REPO_CLASS="${PASCAL}TypeOrmRepository"
   ENTITY_IMPORT="TypeOrmModule.forFeature([${PASCAL}Entity])"
   REPO_PROVIDER="{
-      provide: '${PASCAL}RepositoryPort',
+      provide: ${REPOSITORY_TOKEN},
       useClass: ${PASCAL}TypeOrmRepository,
     }"
 
@@ -215,7 +221,7 @@ EOF
   REPO_CLASS="${PASCAL}PrismaRepository"
   ENTITY_IMPORT=""
   REPO_PROVIDER="{
-      provide: '${PASCAL}RepositoryPort',
+      provide: ${REPOSITORY_TOKEN},
       useClass: ${PASCAL}PrismaRepository,
     }"
 fi
@@ -225,6 +231,7 @@ IMPORTS="import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { ${PASCAL}Controller } from './interfaces/controllers/${NAME}.controller';
 import { Create${PASCAL}Handler } from './core/application/commands/create-${NAME}.handler';
+import { ${REPOSITORY_TOKEN} } from './core/domain/ports/${NAME}.repository';
 import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.${ORM}.repository';"
 
 if [ "$ORM" = "typeorm" ]; then
@@ -240,7 +247,6 @@ echo "$IMPORTS
   controllers: [${PASCAL}Controller],
   providers: [
     Create${PASCAL}Handler,
-    $REPO_CLASS,
     $REPO_PROVIDER,
   ],
 })

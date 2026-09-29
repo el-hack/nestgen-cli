@@ -229,3 +229,32 @@ test('keeps the TypeORM root configuration idempotent', () => {
     assert.equal((appModule.match(/TypeOrmModule\.forRoot/g) ?? []).length, 1);
     assert.equal((decoratorImports(appModule).match(/\bCustomerModule\b/g) ?? []).length, 1);
 });
+
+test('binds repository ports through explicit Nest injection tokens', () => {
+    for (const orm of ['typeorm', 'prisma']) {
+        const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), `nestgen-repository-di-${orm}-`));
+        const appModulePath = path.join(fixturePath, 'src', 'app.module.ts');
+        fs.mkdirSync(path.dirname(appModulePath), { recursive: true });
+        fs.writeFileSync(appModulePath, "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n");
+
+        const result = spawnSync('bash', [addModuleScriptPath, 'order', orm], {
+            cwd: fixturePath,
+            encoding: 'utf8',
+        });
+        assert.equal(result.status, 0, result.stderr);
+
+        const moduleRoot = path.join(fixturePath, 'src', 'app', 'order');
+        const port = fs.readFileSync(path.join(moduleRoot, 'core', 'domain', 'ports', 'order.repository.ts'), 'utf8');
+        const handler = fs.readFileSync(path.join(moduleRoot, 'core', 'application', 'commands', 'create-order.handler.ts'), 'utf8');
+        const generatedModule = fs.readFileSync(path.join(moduleRoot, 'order.module.ts'), 'utf8');
+        const token = port.match(/export const (\w+RepositoryToken) = Symbol\('([^']+RepositoryPort)'\);/);
+        const repositoryClass = generatedModule.match(/useClass: (\w+Repository),/);
+
+        assert.ok(token, 'the generated port must export a runtime DI token');
+        assert.ok(repositoryClass, 'the generated module must bind a repository implementation');
+        assert.match(handler, new RegExp(`@Inject\\(${token[1]}\\) private readonly repo: ${token[2]}`));
+        assert.match(generatedModule, new RegExp(`provide: ${token[1]},`));
+        assert.match(generatedModule, new RegExp(`useClass: ${repositoryClass[1]},`));
+        assert.doesNotMatch(generatedModule, new RegExp(`\\n    ${repositoryClass[1]},`));
+    }
+});
