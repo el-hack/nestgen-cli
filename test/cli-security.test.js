@@ -119,6 +119,35 @@ test('generates a product resource from its business fields', async () => {
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
 });
 
+test('generates OpenAPI DTO schemas only when Swagger is installed', async () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-openapi-'));
+    writeNestManifest(fixturePath);
+    const manifestPath = path.join(fixturePath, 'package.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.dependencies['@nestjs/swagger'] = '12.0.0';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    await generateResource(fixturePath, {
+        name: 'catalog-item',
+        route: 'catalog-items',
+        table: 'catalog_items',
+        fields: parseResourceFields(['sku:string!', 'releasedAt:date?', 'reference:uuid?']),
+    });
+    const dto = fs.readFileSync(
+        path.join(fixturePath, 'src', 'app', 'catalog-item', 'dto', 'create-catalog-item.dto.ts'),
+        'utf8',
+    );
+    assert.match(dto, /ApiProperty/);
+    assert.match(dto, /required: true/);
+    assert.match(dto, /nullable: true/);
+    assert.match(dto, /format: 'date-time'/);
+    assert.match(dto, /format: 'uuid'/);
+});
+
 test('parses scriptable CLI options and returns errors for invalid usage', () => {
     assert.deepEqual(parseCliArgs(['module', 'order', '--orm', 'prisma', '--no-interactive', '--quiet']), {
         command: 'module',

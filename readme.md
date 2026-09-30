@@ -111,6 +111,10 @@ nestgen resource order --fields reference:string!,total:number
 
 The `simple` profile generates a direct CRUD. The `advanced` profile adds application contracts, a repository port and a framework-independent application service between HTTP and the TypeORM adapter.
 
+## OpenAPI when Swagger is enabled
+
+If the project contains `@nestjs/swagger` (selected during `nestgen init`), generated resources enrich the OpenAPI document with DTO property schemas, examples, required and nullable fields, UUID/date formats, endpoint summaries, pagination parameters, and documented `400`, `404`, `409` and success responses. Projects without Swagger keep the same generated REST code and do not receive Swagger imports.
+
 ## Tests generated with a resource
 
 Each generated resource includes a Jest unit test next to its implementation. In a standard project created by Nest, run the complete suite with `npm test`, or one resource with:
