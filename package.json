@@ -1,6 +1,6 @@
 {
     "name": "nestgen-cli",
-    "version": "0.0.7",
+    "version": "0.1.0",
     "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
     "files": [
         "dist",
