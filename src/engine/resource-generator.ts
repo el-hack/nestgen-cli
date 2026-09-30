@@ -4,7 +4,7 @@ import { availableFeatureDirectory } from './project-path.js';
 import { applyFileChanges, FileChange } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
-import { ResourceField, prismaType, typescriptType } from './resource-spec.js';
+import { ResourceField, typescriptType } from './resource-spec.js';
 
 type Options = {
     name: string;
@@ -131,10 +131,6 @@ function featureFiles(
     files.set(
         name + '.module.ts',
         `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, ${className}Service` : ''}],\n})\nexport class ${className}Module {}\n`,
-    );
-    files.set(
-        'persistence/' + name + '.prisma',
-        `model ${className} {\n  id String @id @default(uuid())\n${fields.map((field) => `  ${field.name} ${prismaType(field)}`).join('\n')}\n\n  @@map("${table}")\n}\n`,
     );
     return files;
 }
