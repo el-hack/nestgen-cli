@@ -104,6 +104,9 @@ test('generates a product resource from its business fields', async () => {
     assertOrmOutput(root, 'typeorm');
     assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.entity.ts'), 'utf8'), /catalog_products/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8')).orm, 'typeorm');
+    const unitTest = fs.readFileSync(path.join(root, 'persistence', 'product.repository.spec.ts'), 'utf8');
+    assert.match(unitTest, /persists valid input/);
+    assert.match(unitTest, /uniqueness conflict/);
     assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
     assert.match(fs.readFileSync(path.join(root, 'product.module.ts'), 'utf8'), /TypeOrmModule\.forFeature/);
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
@@ -173,6 +176,10 @@ test('applies the advanced resource profile and versioned project configuration'
     assert.match(repository, /OrderConflictError/);
     assert.match(controller, /NotFoundException/);
     assert.match(controller, /ConflictException/);
+    const unitTest = fs.readFileSync(path.join(root, 'order.service.spec.ts'), 'utf8');
+    assert.match(unitTest, /application output/);
+    assert.match(unitTest, /HTTP 404/);
+    assert.match(unitTest, /HTTP 409/);
 });
 
 test('creates a deterministic module dry-run plan', () => {

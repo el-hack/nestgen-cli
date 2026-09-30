@@ -45,6 +45,16 @@ try {
                 name: 'nestgen-typeorm-http-integration',
                 private: true,
                 type: 'module',
+                scripts: { test: 'node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand' },
+                jest: {
+                    moduleFileExtensions: ['js', 'json', 'ts'],
+                    rootDir: 'src',
+                    testRegex: '.*\\.spec\\.ts$',
+                    extensionsToTreatAsEsm: ['.ts'],
+                    transform: { '^.+\\.ts$': ['ts-jest', { useESM: true }] },
+                    moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+                    testEnvironment: 'node',
+                },
                 dependencies: {
                     '@nestjs/common': '12.0.0',
                     '@nestjs/core': '12.0.0',
@@ -59,7 +69,13 @@ try {
                     supertest: '7.1.4',
                     typeorm: '0.3.27',
                 },
-                devDependencies: { typescript: '5.9.3', '@types/node': '24.19.0' },
+                devDependencies: {
+                    '@types/jest': '29.5.14',
+                    '@types/node': '24.19.0',
+                    jest: '29.7.0',
+                    'ts-jest': '29.2.6',
+                    typescript: '5.9.3',
+                },
             },
             null,
             2,
@@ -83,6 +99,7 @@ try {
                 noUnusedLocals: true,
                 noUnusedParameters: true,
                 skipLibCheck: true,
+                types: ['node', 'jest'],
             },
             include: ['src/**/*.ts'],
         }),
@@ -121,6 +138,7 @@ try {
         profile: 'simple',
     });
     await generateModule(root, 'audit-entry', 'typeorm');
+    run('npm', ['test', '--', '--runInBand']);
     run('docker', [
         'run',
         '--detach',
