@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { applyFileChanges, FileChange } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
 import { ResourceField, prismaType, typescriptType } from './resource-spec.js';
@@ -156,24 +157,16 @@ export function generateResource(projectRoot: string, options: Options): void {
         `./app/${name}/${name}.module.js`,
         `${className}Module`,
     );
-    const stage = path.join(projectRoot, `.nestgen-resource-${name}-${process.pid}`);
-    try {
-        for (const [relative, content] of files) {
-            const target = path.join(stage, relative);
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.writeFileSync(target, content);
-        }
-        fs.writeFileSync(
-            path.join(stage, 'resource.json'),
-            `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
-        );
-        fs.mkdirSync(path.dirname(directory), { recursive: true });
-        fs.renameSync(stage, directory);
-        fs.writeFileSync(appModulePath, appModule);
-    } catch (error) {
-        if (fs.existsSync(directory)) fs.rmSync(directory, { recursive: true, force: true });
-        throw error;
-    } finally {
-        fs.rmSync(stage, { recursive: true, force: true });
-    }
+    const changes: FileChange[] = [...files].map(([relative, content]) => ({
+        path: `src/app/${name}/${relative}`,
+        content,
+        operation: 'create',
+    }));
+    changes.push({
+        path: `src/app/${name}/resource.json`,
+        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+        operation: 'create',
+    });
+    changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
+    applyFileChanges(projectRoot, changes);
 }

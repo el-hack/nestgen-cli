@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { applyFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
 import { prismaType, typescriptType } from './resource-spec.js';
@@ -99,24 +100,16 @@ export function generateResource(projectRoot, options) {
         throw new Error('src/app.module.ts introuvable.');
     const files = featureFiles(name, className, options.fields, options.route, options.table, profile);
     const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
-    const stage = path.join(projectRoot, `.nestgen-resource-${name}-${process.pid}`);
-    try {
-        for (const [relative, content] of files) {
-            const target = path.join(stage, relative);
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.writeFileSync(target, content);
-        }
-        fs.writeFileSync(path.join(stage, 'resource.json'), `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`);
-        fs.mkdirSync(path.dirname(directory), { recursive: true });
-        fs.renameSync(stage, directory);
-        fs.writeFileSync(appModulePath, appModule);
-    }
-    catch (error) {
-        if (fs.existsSync(directory))
-            fs.rmSync(directory, { recursive: true, force: true });
-        throw error;
-    }
-    finally {
-        fs.rmSync(stage, { recursive: true, force: true });
-    }
+    const changes = [...files].map(([relative, content]) => ({
+        path: `src/app/${name}/${relative}`,
+        content,
+        operation: 'create',
+    }));
+    changes.push({
+        path: `src/app/${name}/resource.json`,
+        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+        operation: 'create',
+    });
+    changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
+    applyFileChanges(projectRoot, changes);
 }

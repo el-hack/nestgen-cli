@@ -1,11 +1,10 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { applyFileChanges } from './file-transaction.js';
 // The legacy preflight is JavaScript while the migration is incremental.
 // @ts-expect-error declaration added when preflight moves into this engine.
 import { inspectProject } from '../../nestjs-generator/features/preflight.mjs';
-const stateFile = '.nestgen-transaction.json';
 function describe(rawName) {
     const name = rawName.trim().toLowerCase().replace(/_/g, '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
@@ -59,15 +58,26 @@ function updatePrismaSchema(source, resource) {
         throw new Error(`Le modèle Prisma ${resource.pascal} existe déjà.`);
     return `${source.trimEnd()}\n\nmodel ${resource.pascal} {\n  id    String @id @default(uuid())\n  name  String\n  email String @unique\n\n  @@map("${resource.table}")\n}\n`;
 }
-function ensurePrismaRuntime(projectRoot) {
+function prismaRuntimeChanges(projectRoot) {
     const prismaDirectory = path.join(projectRoot, 'src', 'prisma');
     const servicePath = path.join(prismaDirectory, 'prisma.service.ts');
     const modulePath = path.join(prismaDirectory, 'prisma.module.ts');
+    if (fs.existsSync(servicePath) && fs.existsSync(modulePath))
+        return [];
     if (fs.existsSync(servicePath) || fs.existsSync(modulePath))
-        return;
-    fs.mkdirSync(prismaDirectory, { recursive: true });
-    fs.writeFileSync(servicePath, "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n");
-    fs.writeFileSync(modulePath, "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n");
+        throw new Error('Runtime Prisma incomplet.');
+    return [
+        {
+            path: 'src/prisma/prisma.service.ts',
+            operation: 'create',
+            content: "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n",
+        },
+        {
+            path: 'src/prisma/prisma.module.ts',
+            operation: 'create',
+            content: "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
+        },
+    ];
 }
 function files(resource, orm) {
     const token = `${resource.pascal}RepositoryToken`;
@@ -94,49 +104,28 @@ export function generateModule(projectRoot, rawName, orm) {
         throw new Error(`ORM non supporté : ${orm}.`);
     inspectProject(projectRoot, orm);
     const resource = describe(rawName);
-    const pending = path.join(projectRoot, stateFile);
     const moduleDirectory = path.join(projectRoot, 'src/app', resource.name);
-    const stage = path.join(projectRoot, `.nestgen-stage-${crypto.randomUUID()}`);
-    const appModule = path.join(projectRoot, 'src/app.module.ts');
-    const prismaSchema = path.join(projectRoot, 'prisma/schema.prisma');
-    if (fs.existsSync(pending))
-        throw new Error(`Transaction interrompue détectée : ${stateFile}.`);
     if (fs.existsSync(moduleDirectory))
         throw new Error(`Le module ${resource.name} existe déjà.`);
-    const originalAppModule = fs.readFileSync(appModule, 'utf8');
-    const originalSchema = orm === 'prisma' ? fs.readFileSync(prismaSchema, 'utf8') : undefined;
-    const state = { status: 'prepared', stage, moduleDirectory, appModule };
-    try {
-        for (const [relative, content] of files(resource, orm)) {
-            const target = path.join(stage, relative);
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.writeFileSync(target, content);
-        }
-        const updated = updateAppModule(originalAppModule, `${resource.pascal}Module`, `./app/${resource.name}/${resource.name}.module`);
-        fs.writeFileSync(pending, JSON.stringify(state, null, 2));
-        fs.mkdirSync(path.dirname(moduleDirectory), { recursive: true });
-        fs.renameSync(stage, moduleDirectory);
-        state.status = 'module-applied';
-        fs.writeFileSync(pending, JSON.stringify(state, null, 2));
-        const temporary = `${appModule}.nestgen-${process.pid}`;
-        fs.writeFileSync(temporary, updated);
-        fs.renameSync(temporary, appModule);
-        if (originalSchema) {
-            fs.writeFileSync(prismaSchema, updatePrismaSchema(originalSchema, resource));
-            ensurePrismaRuntime(projectRoot);
-        }
-        fs.rmSync(pending);
+    const appModule = fs.readFileSync(path.join(projectRoot, 'src/app.module.ts'), 'utf8');
+    const changes = [...files(resource, orm)].map(([relative, content]) => ({
+        path: `src/app/${resource.name}/${relative}`,
+        content,
+        operation: 'create',
+    }));
+    changes.push({
+        path: 'src/app.module.ts',
+        operation: 'replace',
+        content: updateAppModule(appModule, `${resource.pascal}Module`, `./app/${resource.name}/${resource.name}.module`),
+    });
+    if (orm === 'prisma') {
+        const schema = fs.readFileSync(path.join(projectRoot, 'prisma/schema.prisma'), 'utf8');
+        changes.push({
+            path: 'prisma/schema.prisma',
+            operation: 'replace',
+            content: updatePrismaSchema(schema, resource),
+        });
+        changes.push(...prismaRuntimeChanges(projectRoot));
     }
-    catch (error) {
-        if (state.status === 'module-applied')
-            fs.rmSync(moduleDirectory, { recursive: true, force: true });
-        if (state.status === 'module-applied')
-            fs.writeFileSync(appModule, originalAppModule);
-        if (originalSchema)
-            fs.writeFileSync(prismaSchema, originalSchema);
-        throw error;
-    }
-    finally {
-        fs.rmSync(stage, { recursive: true, force: true });
-    }
+    applyFileChanges(projectRoot, changes);
 }
