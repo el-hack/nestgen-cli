@@ -76,6 +76,10 @@ nestgen doctor
 
 Fields accepted by `resource` are `string`, `number`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field:
 
+On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
+`null` clears only nullable fields and is rejected for other fields. Values such as
+`false`, `0` and an empty string are preserved when valid for the field type.
+
 ```bash
 nestgen resource invoice \
   --fields number:string!,amount:number,paid:boolean,dueAt:date? \

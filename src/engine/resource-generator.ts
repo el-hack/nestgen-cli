@@ -37,7 +37,11 @@ function entityColumn(field: ResourceField): string {
 }
 
 function validationDecorators(field: ResourceField, optional: boolean): string {
-    const decorators = optional ? ['@IsOptional()'] : [];
+    const decorators = field.nullable
+        ? ['@IsOptional()']
+        : optional
+          ? ['@ValidateIf((_object: unknown, value: unknown) => value !== undefined)']
+          : ['@IsDefined()'];
     decorators.push(
         field.type === 'number'
             ? '@IsNumber()'
@@ -66,7 +70,8 @@ function propertyMap(fields: ResourceField[]): string {
     return fields
         .map((field) => {
             const value = `input.${field.name}`;
-            return `${field.name}: ${field.type === 'date' ? `${value} ? new Date(${value}) : ${value}` : value}`;
+            const converted = field.type === 'date' ? `${value} === null ? null : new Date(${value})` : value;
+            return `...(${value} === undefined ? {} : { ${field.name}: ${converted} })`;
         })
         .join(', ');
 }
@@ -89,11 +94,11 @@ function featureFiles(
     files.set('domain/' + name + '.ts', `export class ${className} {\n    id!: string;\n${domainProperties}\n}\n`);
     files.set(
         'dto/create-' + name + '.dto.ts',
-        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`,
+        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`,
     );
     files.set(
         'dto/update-' + name + '.dto.ts',
-        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`,
+        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`,
     );
     files.set(
         'dto/list-' + name + '.query.ts',
