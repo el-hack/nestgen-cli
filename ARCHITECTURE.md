@@ -1,6 +1,12 @@
 # Moteur de génération
 
-La commande `nestgen module` utilise le moteur TypeScript compilé dans `dist/engine`. Il valide le projet, construit les fichiers dans un répertoire de staging, analyse `AppModule` avec le compilateur TypeScript, puis applique l’enregistrement du module. Une transaction `.nestgen-transaction.json` rend une interruption visible ; une génération ultérieure refuse d’écraser cet état sans intervention explicite. Les entrées utilisateur sont des données de templates et ne sont jamais interpolées dans une commande shell.
+Les commandes `nestgen module` et `nestgen resource` utilisent le moteur TypeScript compilé dans `dist/engine`. Elles calculent toutes les transformations (dont AppModule, schéma et runtime Prisma) avant la première écriture. Un plan commun explicite les créations et remplacements ; les collisions et chemins invalides sont refusés avant staging.
+
+Le répertoire exclusif `.nestgen-transaction` sert de verrou et contient un manifeste, les nouveaux contenus et les sauvegardes. Chaque fichier est installé par renommage sur le même système de fichiers. Si une opération échoue, les fichiers appliqués sont restaurés dans l'ordre inverse, avec leurs permissions, puis les nouveaux répertoires sont retirés. Les tests injectent des erreurs à chaque étape de création, écriture, changement de permissions et renommage pour les deux générateurs et les deux ORM de module.
+
+Cette restauration couvre les erreurs interceptées du processus ; ce n'est pas une transaction multi-fichier du système d'exploitation. Après un arrêt brutal ou une erreur persistante empêchant la restauration, la génération suivante refuse de remplacer le verrou. Le manifeste associe chaque chemin à son index ; `old-N` contient l'original d'un remplacement. Conserver une copie du répertoire avant récupération, examiner les fichiers concernés et restaurer les originaux avant de retirer le verrou. Une ancienne transaction `.nestgen-transaction.json` bloque également la génération. Si seul le nettoyage final échoue après application complète, le CLI signale le nettoyage nécessaire sans annoncer un échec de génération.
+
+Les entrées utilisateur sont des données de templates et ne sont jamais interpolées dans une commande shell.
 
 Les scripts Bash d’initialisation restent une couche de compatibilité pendant la migration. Ils sont appelés avec des arguments séparés par `spawnSync`, sans shell Node ni interpolation de commande. Le chemin de génération de modules ne les utilise plus.
 
