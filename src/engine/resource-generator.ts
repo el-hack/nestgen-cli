@@ -126,6 +126,38 @@ function applicationContract(
     };
 }
 
+function sampleValue(field: ResourceField, transport: boolean): string {
+    if (field.type === 'number') return '42';
+    if (field.type === 'boolean') return 'true';
+    if (field.type === 'date') return transport ? "'2026-01-02T03:04:05.000Z'" : "new Date('2026-01-02T03:04:05.000Z')";
+    if (field.type === 'uuid') return "'00000000-0000-4000-8000-000000000123'";
+    return `'${field.name}-value'`;
+}
+
+function testInput(fields: ResourceField[], transport: boolean): string {
+    return fields.map((field) => `${field.name}: ${sampleValue(field, transport)}`).join(', ');
+}
+
+function generatedUnitTest(
+    name: string,
+    className: string,
+    fields: ResourceField[],
+    advanced: boolean,
+): { path: string; content: string } {
+    const transportInput = testInput(fields, true);
+    const applicationInput = testInput(fields, false);
+    if (advanced) {
+        return {
+            path: `${name}.service.spec.ts`,
+            content: `import { ConflictException, NotFoundException } from '@nestjs/common';\nimport { ${className}ConflictError, ${className}NotFoundError } from './application/${name}.errors.js';\nimport { ${className}Service } from './application/${name}.service.js';\nimport { ${className}Controller } from './${name}.controller.js';\nimport { ${className} } from './domain/${name}.js';\n\ndescribe('${className} advanced resource', () => {\n    const entity = Object.assign(new ${className}(), { id: '00000000-0000-4000-8000-000000000001', ${applicationInput} });\n    const repository = {\n        create: jest.fn(),\n        findOne: jest.fn(),\n        findMany: jest.fn(),\n        update: jest.fn(),\n        remove: jest.fn(),\n    };\n    const service = new ${className}Service(repository);\n    const controller = new ${className}Controller(service);\n\n    beforeEach(() => jest.resetAllMocks());\n\n    it('returns an application output from a persisted domain entity', async () => {\n        repository.create.mockResolvedValue(entity);\n\n        await expect(service.create({ ${applicationInput} })).resolves.toEqual({ id: entity.id, ${fields.map((field) => `${field.name}: entity.${field.name}`).join(', ')} });\n        expect(repository.create).toHaveBeenCalledWith({ ${applicationInput} });\n    });\n\n    it('maps an application not-found error to HTTP 404', async () => {\n        repository.findOne.mockRejectedValue(new ${className}NotFoundError());\n\n        await expect(controller.get(entity.id)).rejects.toBeInstanceOf(NotFoundException);\n    });\n\n    it('maps an application conflict error to HTTP 409', async () => {\n        repository.create.mockRejectedValue(new ${className}ConflictError());\n\n        await expect(controller.create({ ${transportInput} })).rejects.toBeInstanceOf(ConflictException);\n    });\n});\n`,
+        };
+    }
+    return {
+        path: `persistence/${name}.repository.spec.ts`,
+        content: `import { ConflictException, NotFoundException } from '@nestjs/common';\nimport { QueryFailedError } from 'typeorm';\nimport { ${className}Repository } from './${name}.repository.js';\n\ndescribe('${className} repository', () => {\n    const input = { ${transportInput} };\n    const entity = { id: '00000000-0000-4000-8000-000000000001', ${applicationInput} };\n    const persistence = {\n        create: jest.fn((value) => value),\n        save: jest.fn(),\n        findOneBy: jest.fn(),\n        find: jest.fn(),\n        preload: jest.fn(),\n        delete: jest.fn(),\n    };\n    const repository = new ${className}Repository(persistence as never);\n\n    beforeEach(() => jest.resetAllMocks());\n\n    it('persists valid input and returns the domain value', async () => {\n        persistence.save.mockResolvedValue(entity);\n\n        await expect(repository.create(input)).resolves.toMatchObject(entity);\n        expect(persistence.create).toHaveBeenCalledWith(expect.objectContaining({ ${applicationInput} }));\n    });\n\n    it('reports an absent resource', async () => {\n        persistence.findOneBy.mockResolvedValue(null);\n\n        await expect(repository.findOne(entity.id)).rejects.toBeInstanceOf(NotFoundException);\n    });\n\n    it('reports a uniqueness conflict from persistence', async () => {\n        const driverError = Object.assign(new Error('duplicate'), { code: '23505' });\n        persistence.save.mockRejectedValue(new QueryFailedError('INSERT', [], driverError));\n\n        await expect(repository.create(input)).rejects.toBeInstanceOf(ConflictException);\n    });\n});\n`,
+    };
+}
+
 function featureFiles(
     name: string,
     className: string,
@@ -206,6 +238,16 @@ function featureFiles(
     files.set(
         name + '.module.ts',
         `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './application/ports/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, { provide: ${className}Service, useFactory: (repository: ${className}Repository) => new ${className}Service(repository), inject: [${className}RepositoryToken] }` : ''}],\n})\nexport class ${className}Module {}\n`,
+    );
+    const unitTest = generatedUnitTest(name, className, fields, advanced);
+    const unitTestContent = unitTest.content
+        .replaceAll('jest.fn(),', 'jest.fn<() => Promise<unknown>>(),')
+        .replaceAll('jest.fn((value) => value)', 'jest.fn((value: unknown) => value)')
+        .replace(`new ${className}Service(repository)`, `new ${className}Service(repository as never)`)
+        .replaceAll('beforeEach(() => jest.resetAllMocks());', 'beforeEach(() => { jest.resetAllMocks(); });');
+    files.set(
+        unitTest.path,
+        "import { beforeEach, describe, expect, it, jest } from '@jest/globals';\n" + unitTestContent,
     );
     return files;
 }
