@@ -120,6 +120,27 @@ try {
     );
     assert.match(dryRun.stdout, /"module": "invoice"/);
     assert.equal(fs.existsSync(path.join(fixtureDirectory, 'src', 'app', 'invoice')), false);
+
+    run(
+        process.execPath,
+        [
+            binaryPath,
+            'resource',
+            'product',
+            '--orm=typeorm',
+            '--fields=sku:string!,price:number,published:boolean',
+            '--route=catalog/products',
+            '--table=catalog_products',
+            '--no-interactive',
+            '--quiet',
+        ],
+        { cwd: fixtureDirectory },
+    );
+    const resourceRoot = path.join(fixtureDirectory, 'src', 'app', 'product');
+    assert.ok(fs.existsSync(path.join(resourceRoot, 'persistence', 'product.repository.ts')));
+    assert.ok(fs.existsSync(path.join(resourceRoot, 'persistence', 'product.repository.spec.ts')));
+    assert.ok(fs.existsSync(path.join(fixtureDirectory, 'test', 'product.e2e-spec.ts')));
+    assert.ok(fs.existsSync(path.join(fixtureDirectory, 'test', 'compose.e2e.yaml')));
 } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
 }
