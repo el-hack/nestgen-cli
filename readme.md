@@ -16,6 +16,16 @@ NestGen CLI generates NestJS project scaffolding and TypeORM resources. The cano
 
 The repository CI validates linting, formatting, generator contracts, a Prisma integration, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, and the npm tarball. It does not publish releases or deploy applications.
 
+## Outputs by ORM
+
+| Command                         | ORM     | Persistence output                                                                                                    |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `resource` (simple or advanced) | TypeORM | Entity and repository using TypeORM; `resource.json` records `orm: "typeorm"`. No Prisma file or import.              |
+| `module`                        | TypeORM | TypeORM entity and repository, registered with `TypeOrmModule.forFeature`. No Prisma runtime or schema change.        |
+| `module`                        | Prisma  | Prisma repository, model added to `prisma/schema.prisma`, shared Prisma runtime if absent. No TypeORM file or import. |
+
+`resource --orm prisma` is currently rejected before writing files. Full Prisma CRUD resource generation is planned separately. Selecting an ORM does not convert an existing resource or remove files produced by older generator versions.
+
 ## Quickstart — TypeORM resource
 
 The following flow is the supported end-to-end TypeORM path. It uses Docker for PostgreSQL and creates an explicit migration.

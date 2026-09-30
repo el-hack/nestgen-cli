@@ -4,7 +4,7 @@ import { availableFeatureDirectory } from './project-path.js';
 import { applyFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
-import { prismaType, typescriptType } from './resource-spec.js';
+import { typescriptType } from './resource-spec.js';
 function pascal(value) {
     return value
         .split('-')
@@ -81,7 +81,6 @@ function featureFiles(name, className, fields, route, table, profile) {
     }
     files.set(name + '.controller.ts', `import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}${advanced ? 'Service' : 'Repository'} } from './${advanced ? 'application/' + name + '.service' : 'persistence/' + name + '.repository'}.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}${advanced ? 'Service' : 'Repository'}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await this.repository.findMany(skip, query.limit) };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await this.repository.remove(id); }\n}\n`);
     files.set(name + '.module.ts', `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, ${className}Service` : ''}],\n})\nexport class ${className}Module {}\n`);
-    files.set('persistence/' + name + '.prisma', `model ${className} {\n  id String @id @default(uuid())\n${fields.map((field) => `  ${field.name} ${prismaType(field)}`).join('\n')}\n\n  @@map("${table}")\n}\n`);
     return files;
 }
 export function generateResource(projectRoot, options) {

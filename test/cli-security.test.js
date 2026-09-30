@@ -60,6 +60,17 @@ test('validates module names and supported ORMs', () => {
     assert.throws(() => validateOrm('mongoose'));
 });
 
+function assertOrmOutput(root, orm) {
+    const forbidden = orm === 'typeorm' ? /prisma/i : /typeorm/i;
+    const files = fs.readdirSync(root, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    assert.ok(files.length > 0);
+    for (const entry of files) {
+        const file = path.join(entry.parentPath, entry.name);
+        assert.doesNotMatch(path.relative(root, file), forbidden);
+        assert.doesNotMatch(fs.readFileSync(file, 'utf8'), forbidden, `Unexpected ORM reference in ${file}`);
+    }
+}
+
 test('parses a reusable resource field contract', () => {
     const fields = parseResourceFields(['sku:string!', 'price:number', 'available:boolean', 'expiresAt:date?']);
     assert.deepEqual(
@@ -85,10 +96,9 @@ test('generates a product resource from its business fields', () => {
     generateResource(fixturePath, { name: 'product', route: 'catalog/products', table: 'catalog_products', fields });
     const root = path.join(fixturePath, 'src', 'app', 'product');
     assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price!?: number/);
-    assert.match(
-        fs.readFileSync(path.join(root, 'persistence', 'product.prisma'), 'utf8'),
-        /@@map\("catalog_products"\)/,
-    );
+    assertOrmOutput(root, 'typeorm');
+    assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.entity.ts'), 'utf8'), /catalog_products/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8')).orm, 'typeorm');
     assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
     assert.match(fs.readFileSync(path.join(root, 'product.module.ts'), 'utf8'), /TypeOrmModule\.forFeature/);
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
@@ -139,6 +149,8 @@ test('applies the advanced resource profile and versioned project configuration'
         profile: config.profile,
     });
     const root = path.join(fixturePath, 'src', 'app', 'order');
+    assertOrmOutput(root, 'typeorm');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8')).orm, 'typeorm');
     assert.equal(fs.existsSync(path.join(root, 'domain', 'order.repository.port.ts')), true);
     assert.match(fs.readFileSync(path.join(root, 'order.controller.ts'), 'utf8'), /OrderService/);
     assert.match(fs.readFileSync(path.join(root, 'order.module.ts'), 'utf8'), /OrderRepositoryToken/);
@@ -258,6 +270,7 @@ test('generates a module through the TypeScript engine and structurally register
     );
 
     generateModule(fixturePath, 'invoice-item', 'typeorm');
+    assertOrmOutput(path.join(fixturePath, 'src'), 'typeorm');
 
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice-item', 'invoice-item.module.ts')), true);
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /InvoiceItemModule/);
@@ -279,6 +292,7 @@ test('generates a Prisma model and uses the generated Prisma runtime without ali
     );
 
     generateModule(fixturePath, 'invoice', 'prisma');
+    assertOrmOutput(path.join(fixturePath, 'src'), 'prisma');
 
     const schema = fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8');
     const repository = fs.readFileSync(
