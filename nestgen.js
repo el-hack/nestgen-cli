@@ -322,10 +322,10 @@ async function runModuleGeneration(parsed) {
         return;
     }
 
-    generateModule(process.cwd(), moduleName, orm);
+    await generateModule(process.cwd(), moduleName, orm);
 }
 
-function runResourceGeneration(parsed) {
+async function runResourceGeneration(parsed) {
     const name = validateModuleName(parsed.positionals[0] ?? '');
     if (!parsed.options.fields) throw new Error('resource requiert --fields champ:type[,champ:type].');
     const config = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
@@ -340,7 +340,7 @@ function runResourceGeneration(parsed) {
         console.log(JSON.stringify({ operation: 'resource', name, route, table, orm, profile, fields }, null, 2));
         return;
     }
-    generateResource(process.cwd(), { name, route, table, fields, orm, profile });
+    await generateResource(process.cwd(), { name, route, table, fields, orm, profile });
 }
 
 function printUsage() {
@@ -407,7 +407,7 @@ export async function main(args = process.argv.slice(2)) {
             break;
 
         case 'resource':
-            runResourceGeneration(parsed);
+            await runResourceGeneration(parsed);
             break;
 
         case 'config': {

@@ -1,8 +1,10 @@
+import { check } from 'prettier';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { URL } from 'node:url';
+import { generateModule } from '../dist/engine/module-generator.js';
 import { generateResource } from '../dist/engine/resource-generator.js';
 import { parseResourceFields } from '../dist/engine/resource-spec.js';
 
@@ -46,6 +48,7 @@ try {
                 dependencies: {
                     '@nestjs/common': '12.0.0',
                     '@nestjs/core': '12.0.0',
+                    '@nestjs/cqrs': '12.0.0',
                     '@nestjs/platform-express': '12.0.0',
                     '@nestjs/typeorm': '12.0.0',
                     'class-transformer': '0.5.1',
@@ -77,13 +80,15 @@ try {
                 experimentalDecorators: true,
                 emitDecoratorMetadata: true,
                 strict: true,
+                noUnusedLocals: true,
+                noUnusedParameters: true,
                 skipLibCheck: true,
             },
             include: ['src/**/*.ts'],
         }),
     );
     run('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund']);
-    generateResource(root, {
+    await generateResource(root, {
         name: 'product',
         route: 'catalog/products',
         table: 'catalog_products',
@@ -99,7 +104,7 @@ try {
         ]),
         profile: 'advanced',
     });
-    generateResource(root, {
+    await generateResource(root, {
         name: 'simpleproduct',
         route: 'simple-products',
         table: 'simple_products',
@@ -115,6 +120,7 @@ try {
         ]),
         profile: 'simple',
     });
+    await generateModule(root, 'audit-entry', 'typeorm');
     run('docker', [
         'run',
         '--detach',
@@ -134,6 +140,18 @@ try {
     const port = run('docker', ['port', postgresContainer, '5432/tcp']).stdout.trim().split(':').at(-1);
     if (!port) throw new Error('Port PostgreSQL introuvable.');
     waitForPostgres();
+    for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;
+        const file = path.join(entry.parentPath, entry.name);
+        if (
+            !(await check(fs.readFileSync(file, 'utf8'), {
+                parser: 'typescript',
+                singleQuote: true,
+                trailingComma: 'all',
+            }))
+        )
+            throw new Error(`Generated file does not pass Prettier: ${file}`);
+    }
     run('npx', ['tsc']);
     fs.writeFileSync(
         path.join(root, 'exercise.mjs'),

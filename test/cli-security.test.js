@@ -84,7 +84,7 @@ test('parses a reusable resource field contract', () => {
     assert.throws(() => parseResourceFields(['price:number', 'price:string']));
 });
 
-test('generates a product resource from its business fields', () => {
+test('generates a product resource from its business fields', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-'));
     writeNestManifest(fixturePath);
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
@@ -93,7 +93,12 @@ test('generates a product resource from its business fields', () => {
         "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
     );
     const fields = parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']);
-    generateResource(fixturePath, { name: 'product', route: 'catalog/products', table: 'catalog_products', fields });
+    await generateResource(fixturePath, {
+        name: 'product',
+        route: 'catalog/products',
+        table: 'catalog_products',
+        fields,
+    });
     const root = path.join(fixturePath, 'src', 'app', 'product');
     assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price!?: number/);
     assertOrmOutput(root, 'typeorm');
@@ -126,7 +131,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
 });
 
-test('applies the advanced resource profile and versioned project configuration', () => {
+test('applies the advanced resource profile and versioned project configuration', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-profile-'));
     writeNestManifest(fixturePath);
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
@@ -141,7 +146,7 @@ test('applies the advanced resource profile and versioned project configuration'
     assert.equal(init.status, 0, init.stderr);
     const config = JSON.parse(fs.readFileSync(path.join(fixturePath, 'nestgen.config.json'), 'utf8'));
     assert.equal(config.profile, 'advanced');
-    generateResource(fixturePath, {
+    await generateResource(fixturePath, {
         name: 'order',
         route: 'orders',
         table: 'orders',
@@ -260,7 +265,7 @@ test('does not create a module directory when preflight fails', () => {
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice')), false);
 });
 
-test('generates a module through the TypeScript engine and structurally registers it', () => {
+test('generates a module through the TypeScript engine and structurally registers it', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typescript-engine-'));
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
     writeNestManifest(fixturePath);
@@ -269,7 +274,7 @@ test('generates a module through the TypeScript engine and structurally register
         "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
     );
 
-    generateModule(fixturePath, 'invoice-item', 'typeorm');
+    await generateModule(fixturePath, 'invoice-item', 'typeorm');
     assertOrmOutput(path.join(fixturePath, 'src'), 'typeorm');
 
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice-item', 'invoice-item.module.ts')), true);
@@ -277,7 +282,7 @@ test('generates a module through the TypeScript engine and structurally register
     assert.equal(fs.existsSync(path.join(fixturePath, '.nestgen-transaction.json')), false);
 });
 
-test('generates a Prisma model and uses the generated Prisma runtime without aliases', () => {
+test('generates a Prisma model and uses the generated Prisma runtime without aliases', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-engine-'));
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
     fs.mkdirSync(path.join(fixturePath, 'prisma'), { recursive: true });
@@ -291,7 +296,7 @@ test('generates a Prisma model and uses the generated Prisma runtime without ali
         'generator client { provider = "prisma-client-js" }\n\ndatasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
     );
 
-    generateModule(fixturePath, 'invoice', 'prisma');
+    await generateModule(fixturePath, 'invoice', 'prisma');
     assertOrmOutput(path.join(fixturePath, 'src'), 'prisma');
 
     const schema = fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8');

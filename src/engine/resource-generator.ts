@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
 import { availableFeatureDirectory } from './project-path.js';
 import { applyFileChanges, FileChange } from './file-transaction.js';
@@ -38,7 +39,7 @@ function entityColumn(field: ResourceField): string {
     return `    @Column({ ${options.join(', ')} })\n    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`;
 }
 
-function validationDecorators(field: ResourceField, optional: boolean): string {
+function validationDecorators(field: ResourceField, optional: boolean): string[] {
     const decorators = field.nullable
         ? ['@IsOptional()']
         : optional
@@ -55,7 +56,7 @@ function validationDecorators(field: ResourceField, optional: boolean): string {
                   ? '@IsUUID()'
                   : '@IsString()',
     );
-    return decorators.map((decorator) => `    ${decorator}`).join('\n');
+    return decorators;
 }
 
 function dtoFields(fields: ResourceField[], optional: boolean): string {
@@ -63,9 +64,18 @@ function dtoFields(fields: ResourceField[], optional: boolean): string {
         .map((field) => {
             const isOptional = optional || field.nullable;
             const type = field.type === 'date' ? 'string' : typescriptType(field);
-            return `${validationDecorators(field, isOptional)}\n    ${field.name}${isOptional ? '?' : '!'}: ${type}${field.nullable ? ' | null' : ''};`;
+            return `${validationDecorators(field, isOptional)
+                .map((decorator) => `    ${decorator}`)
+                .join('\n')}\n    ${field.name}${isOptional ? '?' : '!'}: ${type}${field.nullable ? ' | null' : ''};`;
         })
         .join('\n\n');
+}
+
+function validationImports(fields: ResourceField[], optional: boolean): string {
+    const names = fields.flatMap((field) =>
+        validationDecorators(field, optional).map((decorator) => decorator.slice(1, decorator.indexOf('('))),
+    );
+    return [...new Set(names)].sort().join(', ');
 }
 
 function propertyMap(fields: ResourceField[]): string {
@@ -96,11 +106,11 @@ function featureFiles(
     files.set('domain/' + name + '.ts', `export class ${className} {\n    id!: string;\n${domainProperties}\n}\n`);
     files.set(
         'dto/create-' + name + '.dto.ts',
-        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`,
+        `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`,
     );
     files.set(
         'dto/update-' + name + '.dto.ts',
-        `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`,
+        `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`,
     );
     files.set(
         'dto/list-' + name + '.query.ts',
@@ -135,7 +145,7 @@ function featureFiles(
     return files;
 }
 
-export function generateResource(projectRoot: string, options: Options): void {
+export async function generateResource(projectRoot: string, options: Options): Promise<void> {
     const profile = parseArchitectureProfile(options.profile);
     const orm = options.orm ?? 'typeorm';
     if (orm !== 'typeorm') throw new Error('La commande resource prend actuellement en charge TypeORM uniquement.');
@@ -165,5 +175,5 @@ export function generateResource(projectRoot: string, options: Options): void {
         operation: 'create',
     });
     changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
-    applyFileChanges(projectRoot, changes);
+    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
 }

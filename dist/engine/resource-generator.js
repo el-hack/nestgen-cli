@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
 import { availableFeatureDirectory } from './project-path.js';
 import { applyFileChanges } from './file-transaction.js';
@@ -41,16 +42,22 @@ function validationDecorators(field, optional) {
                 : field.type === 'uuid'
                     ? '@IsUUID()'
                     : '@IsString()');
-    return decorators.map((decorator) => `    ${decorator}`).join('\n');
+    return decorators;
 }
 function dtoFields(fields, optional) {
     return fields
         .map((field) => {
         const isOptional = optional || field.nullable;
         const type = field.type === 'date' ? 'string' : typescriptType(field);
-        return `${validationDecorators(field, isOptional)}\n    ${field.name}${isOptional ? '?' : '!'}: ${type}${field.nullable ? ' | null' : ''};`;
+        return `${validationDecorators(field, isOptional)
+            .map((decorator) => `    ${decorator}`)
+            .join('\n')}\n    ${field.name}${isOptional ? '?' : '!'}: ${type}${field.nullable ? ' | null' : ''};`;
     })
         .join('\n\n');
+}
+function validationImports(fields, optional) {
+    const names = fields.flatMap((field) => validationDecorators(field, optional).map((decorator) => decorator.slice(1, decorator.indexOf('('))));
+    return [...new Set(names)].sort().join(', ');
 }
 function propertyMap(fields) {
     return fields
@@ -70,8 +77,8 @@ function featureFiles(name, className, fields, route, table, profile) {
         .join('\n');
     const files = new Map();
     files.set('domain/' + name + '.ts', `export class ${className} {\n    id!: string;\n${domainProperties}\n}\n`);
-    files.set('dto/create-' + name + '.dto.ts', `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`);
-    files.set('dto/update-' + name + '.dto.ts', `import { IsBoolean, IsDateString, IsNumber, IsOptional, IsDefined, IsString, IsUUID, ValidateIf } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`);
+    files.set('dto/create-' + name + '.dto.ts', `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`);
+    files.set('dto/update-' + name + '.dto.ts', `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`);
     files.set('dto/list-' + name + '.query.ts', `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport const MAX_PAGE_SIZE = 100;\n\nexport class List${className}Query {\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;\n\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;\n}\n`);
     files.set('persistence/' + name + '.entity.ts', `import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';\n\n@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`);
     files.set('persistence/' + name + '.repository.ts', `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className} } from '../domain/${name}.js';\n${advanced ? `import { ${className}RepositoryPort } from '../domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: Create${className}Dto): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw new NotFoundException('${className} introuvable');\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: Update${className}Dto): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw new NotFoundException('${className} introuvable');\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        const result = await this.repository.delete(id);\n        if (!result.affected) throw new NotFoundException('${className} introuvable');\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw new ConflictException('Une ressource avec cette valeur unique existe déjà.');\n        throw error;\n    }\n}\n`);
@@ -83,7 +90,7 @@ function featureFiles(name, className, fields, route, table, profile) {
     files.set(name + '.module.ts', `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, ${className}Service` : ''}],\n})\nexport class ${className}Module {}\n`);
     return files;
 }
-export function generateResource(projectRoot, options) {
+export async function generateResource(projectRoot, options) {
     const profile = parseArchitectureProfile(options.profile);
     const orm = options.orm ?? 'typeorm';
     if (orm !== 'typeorm')
@@ -109,5 +116,5 @@ export function generateResource(projectRoot, options) {
         operation: 'create',
     });
     changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
-    applyFileChanges(projectRoot, changes);
+    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
 }
