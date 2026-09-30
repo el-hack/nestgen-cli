@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { projectPath } from './project-path.js';
 
 export type FileChange = { path: string; content: string; operation: 'create' | 'replace' };
 const transactionDirectory = '.nestgen-transaction';
@@ -10,21 +11,12 @@ export function applyFileChanges(projectRoot: string, changes: FileChange[]): vo
     const stage = path.join(root, transactionDirectory);
     const targets = new Set<string>();
     const plan = changes.map((change, index) => {
-        const target = path.resolve(root, change.path);
+        const target = projectPath(root, change.path);
         const relative = path.relative(root, target);
-        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-            throw new Error(`Destination hors projet : ${change.path}`);
         if (relative.split(path.sep)[0].startsWith('.nestgen-transaction'))
             throw new Error(`Destination réservée : ${change.path}`);
         if (targets.has(target)) throw new Error(`Destination dupliquée : ${change.path}`);
         targets.add(target);
-        let current = root;
-        for (const part of relative.split(path.sep)) {
-            current = path.join(current, part);
-            const stat = fs.lstatSync(current, { throwIfNoEntry: false });
-            if (stat?.isSymbolicLink()) throw new Error(`Lien symbolique non supporté : ${current}`);
-            if (stat && current !== target && !stat.isDirectory()) throw new Error(`Répertoire attendu : ${current}`);
-        }
         const stat = fs.lstatSync(target, { throwIfNoEntry: false });
         if (change.operation === 'create' && stat) throw new Error(`Le fichier existe déjà : ${change.path}`);
         if (change.operation === 'replace' && !stat?.isFile())

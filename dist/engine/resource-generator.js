@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import path from 'node:path';
+import { inspectProject } from './project-preflight.js';
+import { availableFeatureDirectory } from './project-path.js';
 import { applyFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
@@ -88,16 +89,14 @@ export function generateResource(projectRoot, options) {
     const orm = options.orm ?? 'typeorm';
     if (orm !== 'typeorm')
         throw new Error('La commande resource prend actuellement en charge TypeORM uniquement.');
-    const name = options.name.toLowerCase();
-    const className = pascal(name);
-    const directory = path.join(projectRoot, 'src', 'app', name);
-    const appModulePath = path.join(projectRoot, 'src', 'app.module.ts');
-    if (!/^[a-z][a-z0-9-]*$/.test(name))
+    const name = options.name.trim().toLowerCase().replaceAll('_', '-');
+    if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
         throw new Error('Nom de ressource invalide.');
-    if (fs.existsSync(directory))
-        throw new Error(`La ressource ${name} existe déjà.`);
-    if (!fs.existsSync(appModulePath))
-        throw new Error('src/app.module.ts introuvable.');
+    const className = pascal(name);
+    const project = inspectProject(projectRoot, orm, { cqrs: false });
+    projectRoot = project.root;
+    availableFeatureDirectory(projectRoot, name);
+    const appModulePath = project.appModulePath;
     const files = featureFiles(name, className, options.fields, options.route, options.table, profile);
     const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
     const changes = [...files].map(([relative, content]) => ({

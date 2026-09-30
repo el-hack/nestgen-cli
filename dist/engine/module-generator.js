@@ -2,9 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import { applyFileChanges } from './file-transaction.js';
-// The legacy preflight is JavaScript while the migration is incremental.
-// @ts-expect-error declaration added when preflight moves into this engine.
-import { inspectProject } from '../../nestjs-generator/features/preflight.mjs';
+import { inspectProject } from './project-preflight.js';
+import { availableFeatureDirectory } from './project-path.js';
 function describe(rawName) {
     const name = rawName.trim().toLowerCase().replace(/_/g, '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
@@ -34,7 +33,15 @@ function updateAppModule(source, moduleClass, moduleImport, moduleReference = mo
         !ts.isCallExpression(decorator.expression) ||
         !ts.isObjectLiteralExpression(decorator.expression.arguments[0]))
         throw new Error('AppModule doit utiliser @Module({ ... }).');
-    const imports = decorator.expression.arguments[0].properties.find((property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === 'imports');
+    const metadata = decorator.expression.arguments[0];
+    if (metadata.properties.some((property) => ts.isSpreadAssignment(property) || (property.name && ts.isComputedPropertyName(property.name))))
+        throw new Error('AppModule : les métadonnées avec spread ou clés calculées ne sont pas supportées.');
+    const importProperties = metadata.properties.filter((property) => property.name &&
+        (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
+        property.name.text === 'imports');
+    if (importProperties.length > 1)
+        throw new Error('AppModule : propriété imports dupliquée.');
+    const imports = importProperties[0] && ts.isPropertyAssignment(importProperties[0]) ? importProperties[0] : undefined;
     if (!imports || !ts.isArrayLiteralExpression(imports.initializer))
         throw new Error('AppModule doit définir imports: [] pour enregistrer un module.');
     if (imports.initializer.elements.some((element) => element.getText(file) === moduleReference))
@@ -102,11 +109,9 @@ function files(resource, orm) {
 export function generateModule(projectRoot, rawName, orm) {
     if (orm !== 'typeorm' && orm !== 'prisma')
         throw new Error(`ORM non supporté : ${orm}.`);
-    inspectProject(projectRoot, orm);
     const resource = describe(rawName);
-    const moduleDirectory = path.join(projectRoot, 'src/app', resource.name);
-    if (fs.existsSync(moduleDirectory))
-        throw new Error(`Le module ${resource.name} existe déjà.`);
+    projectRoot = inspectProject(projectRoot, orm).root;
+    availableFeatureDirectory(projectRoot, resource.name);
     const appModule = fs.readFileSync(path.join(projectRoot, 'src/app.module.ts'), 'utf8');
     const changes = [...files(resource, orm)].map(([relative, content]) => ({
         path: `src/app/${resource.name}/${relative}`,

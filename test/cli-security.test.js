@@ -75,6 +75,7 @@ test('parses a reusable resource field contract', () => {
 
 test('generates a product resource from its business fields', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-'));
+    writeNestManifest(fixturePath);
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
     fs.writeFileSync(
         path.join(fixturePath, 'src', 'app.module.ts'),
@@ -117,6 +118,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
 
 test('applies the advanced resource profile and versioned project configuration', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-profile-'));
+    writeNestManifest(fixturePath);
     fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
     fs.writeFileSync(
         path.join(fixturePath, 'src', 'app.module.ts'),
@@ -645,6 +647,11 @@ test('binds repository ports through explicit Nest injection tokens', () => {
             "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
         );
         writeNestManifest(fixturePath);
+
+        if (orm === 'prisma') {
+            fs.mkdirSync(path.join(fixturePath, 'prisma'));
+            fs.writeFileSync(path.join(fixturePath, 'prisma/schema.prisma'), '// existing schema\n');
+        }
 
         const result = spawnSync('bash', [addModuleScriptPath, 'order', orm], {
             cwd: fixturePath,
