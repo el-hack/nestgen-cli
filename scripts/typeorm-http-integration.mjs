@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { URL } from 'node:url';
 import { generateResource } from '../dist/engine/resource-generator.js';
 import { parseResourceFields } from '../dist/engine/resource-spec.js';
 
@@ -86,14 +87,32 @@ try {
         name: 'product',
         route: 'catalog/products',
         table: 'catalog_products',
-        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean']),
+        fields: parseResourceFields([
+            'sku:string!',
+            'price:number',
+            'published:boolean',
+            'releasedAt:date?',
+            'note:string?',
+            'quantity:number?',
+            'enabled:boolean?',
+            'reference:uuid?',
+        ]),
         profile: 'advanced',
     });
     generateResource(root, {
         name: 'simpleproduct',
         route: 'simple-products',
         table: 'simple_products',
-        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean']),
+        fields: parseResourceFields([
+            'sku:string!',
+            'price:number',
+            'published:boolean',
+            'releasedAt:date?',
+            'note:string?',
+            'quantity:number?',
+            'enabled:boolean?',
+            'reference:uuid?',
+        ]),
         profile: 'simple',
     });
     run('docker', [
@@ -118,7 +137,7 @@ try {
     run('npx', ['tsc']);
     fs.writeFileSync(
         path.join(root, 'exercise.mjs'),
-        `import 'reflect-metadata';\nimport { ValidationPipe } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport request from 'supertest';\nimport { AppModule } from './build/app.module.js';\n\nlet step = 'initialisation de NestJS';\nconst app = await NestFactory.create(AppModule, { logger: false });\napp.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));\nawait app.init();\ntry {\n    const api = request(app.getHttpServer());\n    step = 'validation des identifiants pour les deux profils';\n    for (const route of ['/catalog/products', '/simple-products']) {\n        for (const method of ['get', 'patch', 'delete']) {\n            await api[method](route + '/not-a-uuid').expect(400);\n            await api[method](route + '/00000000-0000-4000-8000-000000000001').expect(404);\n        }\n        const sample = await api.post(route).send({ sku: 'uuid-check', price: 1, published: false }).expect(201);\n        await api.get(route + '/' + sample.body.id).expect(200);\n        await api.patch(route + '/' + sample.body.id).send({ price: 2 }).expect(200);\n        await api.delete(route + '/' + sample.body.id).expect(204);\n    }\n    step = 'création de la ressource';\n    const created = await api.post('/catalog/products').send({ sku: 'sku-1', price: 12.5, published: true }).expect(201);\n    if (!created.body.id || created.body.price !== 12.5) throw new Error('La création TypeORM ne retourne pas la ressource persistée.');\n    step = 'validation HTTP 400';\n    await api.post('/catalog/products').send({ sku: 'sku-2', price: 'invalid', published: true }).expect(400);\n    step = 'conflit HTTP 409';\n    await api.post('/catalog/products').send({ sku: 'sku-1', price: 15, published: false }).expect(409);\n    step = 'borne de pagination';\n    await api.get('/catalog/products?limit=101').expect(400);\n    step = 'lecture paginée';\n    const listed = await api.get('/catalog/products?page=1&limit=1').expect(200);\n    if (listed.body.data.length !== 1 || listed.body.limit !== 1) throw new Error('La pagination ne renvoie pas le contrat attendu.');\n    step = 'mise à jour';\n    await api.patch('/catalog/products/' + created.body.id).send({ price: 20 }).expect(200);\n    step = 'lecture après mise à jour';\n    const found = await api.get('/catalog/products/' + created.body.id).expect(200);\n    if (found.body.price !== 20) throw new Error('La mise à jour TypeORM n’est pas persistée.');\n    step = 'suppression';\n    await api.delete('/catalog/products/' + created.body.id).expect(204);\n    step = 'vérification HTTP 404';\n    await api.get('/catalog/products/' + created.body.id).expect(404);\n} catch (error) {\n    console.error('TypeORM HTTP integration failed during ' + step + ':', error);\n    throw error;\n} finally {\n    await app.close();\n}\n`,
+        fs.readFileSync(new URL('./fixtures/typeorm-http-exercise.mjs', import.meta.url), 'utf8'),
     );
     run(process.execPath, ['exercise.mjs'], root, { DATABASE_HOST: '127.0.0.1', DATABASE_PORT: port });
 } finally {
