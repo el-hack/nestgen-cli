@@ -156,9 +156,23 @@ test('applies the advanced resource profile and versioned project configuration'
     const root = path.join(fixturePath, 'src', 'app', 'order');
     assertOrmOutput(root, 'typeorm');
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8')).orm, 'typeorm');
-    assert.equal(fs.existsSync(path.join(root, 'domain', 'order.repository.port.ts')), true);
+    assert.equal(fs.existsSync(path.join(root, 'domain', 'order.repository.port.ts')), false);
     assert.match(fs.readFileSync(path.join(root, 'order.controller.ts'), 'utf8'), /OrderService/);
     assert.match(fs.readFileSync(path.join(root, 'order.module.ts'), 'utf8'), /OrderRepositoryToken/);
+    const port = fs.readFileSync(path.join(root, 'application', 'ports', 'order.repository.port.ts'), 'utf8');
+    const contract = fs.readFileSync(path.join(root, 'application', 'order.contract.ts'), 'utf8');
+    const service = fs.readFileSync(path.join(root, 'application', 'order.service.ts'), 'utf8');
+    const repository = fs.readFileSync(path.join(root, 'persistence', 'order.repository.ts'), 'utf8');
+    const controller = fs.readFileSync(path.join(root, 'order.controller.ts'), 'utf8');
+    assert.doesNotMatch(port, /dto|typeorm|@nestjs/i);
+    assert.doesNotMatch(contract, /dto|typeorm|@nestjs/i);
+    assert.doesNotMatch(service, /dto|typeorm|@nestjs/i);
+    assert.match(contract, /CreateOrderInput/);
+    assert.match(contract, /OrderOutput/);
+    assert.match(repository, /OrderNotFoundError/);
+    assert.match(repository, /OrderConflictError/);
+    assert.match(controller, /NotFoundException/);
+    assert.match(controller, /ConflictException/);
 });
 
 test('creates a deterministic module dry-run plan', () => {
