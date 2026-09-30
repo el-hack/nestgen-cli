@@ -26,6 +26,7 @@ const configureBootstrapPath = path.resolve('nestjs-generator/features/configure
 const injectModuleScriptPath = path.resolve('nestjs-generator/features/inject_module_to_app.sh');
 const generateProjectScriptPath = path.resolve('nestjs-generator/generate_project.sh');
 const packageManagerHelpersPath = path.resolve('nestjs-generator/features/utils.sh');
+const packageVersion = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')).version;
 
 function writeNestManifest(fixturePath) {
     fs.writeFileSync(
@@ -156,7 +157,7 @@ test('exposes stable help, version and error exit codes', () => {
 
     const version = spawnSync(process.execPath, [cliPath, '--version'], { encoding: 'utf8' });
     assert.equal(version.status, 0);
-    assert.match(version.stdout, /0\.0\.7/);
+    assert.equal(version.stdout.trim(), packageVersion);
 
     const unknown = spawnSync(process.execPath, [cliPath, 'unknown'], { encoding: 'utf8' });
     assert.equal(unknown.status, 1);
