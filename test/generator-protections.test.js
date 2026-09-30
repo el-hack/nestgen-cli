@@ -142,14 +142,14 @@ for (const [label, generate] of generators) {
             ],
         ];
         for (const [name, prepare, expected] of cases) {
-            await t.test(name, (t) => {
+            await t.test(name, async (t) => {
                 const { root, base } = fixture(t);
                 prepare(root);
                 const before = snapshot(base);
                 const mkdir = t.mock.method(fs, 'mkdirSync', () => {
                     throw new Error('unexpected mutation');
                 });
-                assert.throws(() => generate(root), expected);
+                await assert.rejects(() => generate(root), expected);
                 assert.equal(mkdir.mock.callCount(), 0);
                 assert.deepEqual(snapshot(base), before);
             });
@@ -167,7 +167,7 @@ for (const [label, generate] of generators) {
             );
         for (const relative of paths)
             for (const kind of ['external', 'internal', 'dangling']) {
-                await t.test(`${relative}: ${kind}`, (t) => {
+                await t.test(`${relative}: ${kind}`, async (t) => {
                     const { root, base } = fixture(t);
                     const link = path.join(root, relative);
                     const destination =
@@ -181,28 +181,28 @@ for (const [label, generate] of generators) {
                     const mkdir = t.mock.method(fs, 'mkdirSync', () => {
                         throw new Error('unexpected mutation');
                     });
-                    assert.throws(() => generate(root), /Lien symbolique non supporté/);
+                    await assert.rejects(() => generate(root), /Lien symbolique non supporté/);
                     assert.equal(mkdir.mock.callCount(), 0);
                     assert.deepEqual(snapshot(base), before);
                 });
             }
     });
-    test(`${label}: rejects path traversal and malformed names`, (t) => {
+    test(`${label}: rejects path traversal and malformed names`, async (t) => {
         const { root, base } = fixture(t);
         const before = snapshot(base);
         for (const name of ['../outside', '/tmp/escape', 'a/../../outside', 'a\\..\\outside', 'a--b', 'a-'])
-            assert.throws(() => generate(root, name), /Nom de .* invalide/);
+            await assert.rejects(() => generate(root, name), /Nom de .* invalide/);
         assert.deepEqual(snapshot(base), before);
     });
 }
 
-test('resource generation does not require unused CQRS dependencies', (t) => {
+test('resource generation does not require unused CQRS dependencies', async (t) => {
     const { root } = fixture(t);
     const file = path.join(root, 'package.json');
     const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
     delete manifest.dependencies['@nestjs/cqrs'];
     fs.writeFileSync(file, JSON.stringify(manifest));
-    generators[2][1](root);
+    await generators[2][1](root);
     assert.ok(fs.existsSync(path.join(root, 'src/app/invoice/invoice.module.ts')));
 });
 

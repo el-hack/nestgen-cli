@@ -1,3 +1,4 @@
+import { check } from 'prettier';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -77,6 +78,8 @@ try {
                 experimentalDecorators: true,
                 emitDecoratorMetadata: true,
                 strict: true,
+                noUnusedLocals: true,
+                noUnusedParameters: true,
                 skipLibCheck: true,
             },
             include: ['src/**/*.ts'],
@@ -84,7 +87,7 @@ try {
     );
 
     run('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund']);
-    generateModule(root, 'invoice', 'prisma');
+    await generateModule(root, 'invoice', 'prisma');
     run('docker', [
         'run',
         '--detach',
@@ -115,6 +118,18 @@ try {
         path.join(root, 'persist.mjs'),
         "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { InvoiceRepositoryToken } from './build/app/invoice/core/domain/ports/invoice.repository.js';\nimport { Invoice } from './build/app/invoice/core/domain/entities/invoice.entity.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(InvoiceRepositoryToken, { strict: false }); const saved = await repository.save(new Invoice(undefined, 'Integration', 'integration@example.test')); const found = await repository.findById(saved.id); if (found?.email !== 'integration@example.test') throw new Error('persisted record was not found'); } finally { await app.close(); }\n",
     );
+    for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;
+        const file = path.join(entry.parentPath, entry.name);
+        if (
+            !(await check(fs.readFileSync(file, 'utf8'), {
+                parser: 'typescript',
+                singleQuote: true,
+                trailingComma: 'all',
+            }))
+        )
+            throw new Error(`Generated file does not pass Prettier: ${file}`);
+    }
     run('npx', ['tsc']);
     run(process.execPath, ['persist.mjs']);
 } finally {

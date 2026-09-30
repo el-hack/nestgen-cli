@@ -71,7 +71,7 @@ const generators = {
 };
 
 for (const [name, generate] of Object.entries(generators)) {
-    test(`${name}: restores bytes, modes and directories on every write failure`, (t) => {
+    test(`${name}: restores bytes, modes and directories on every write failure`, async (t) => {
         const methods = ['mkdirSync', 'writeFileSync', 'chmodSync', 'renameSync'];
         const root = fixture(t);
         const counts = Object.fromEntries(methods.map((method) => [method, 0]));
@@ -83,7 +83,7 @@ for (const [name, generate] of Object.entries(generators)) {
             });
         }
         try {
-            generate(root);
+            await generate(root);
         } finally {
             t.mock.restoreAll();
         }
@@ -105,25 +105,25 @@ for (const [name, generate] of Object.entries(generators)) {
                     return original(...args);
                 });
                 try {
-                    assert.throws(() => generate(target), /injected/);
+                    await assert.rejects(() => generate(target), /injected/);
                 } finally {
                     t.mock.restoreAll();
                 }
                 assert.deepEqual(snapshot(target), before, `${name}: ${method} #${failAt}`);
-                generate(target); // A recovered invocation must not leave a stale lock blocking retries.
+                await generate(target); // A recovered invocation must not leave a stale lock blocking retries.
             }
         }
     });
 }
 
-test('validates all transformations and destinations before staging', (t) => {
+test('validates all transformations and destinations before staging', async (t) => {
     const root = fixture(t);
     fs.appendFileSync(path.join(root, 'prisma/schema.prisma'), '\nmodel Invoice { id String @id }\n');
     const before = snapshot(root);
     const mkdir = t.mock.method(fs, 'mkdirSync', () => {
         throw new Error('unexpected write');
     });
-    assert.throws(() => generateModule(root, 'invoice', 'prisma'), /existe déjà/);
+    await assert.rejects(() => generateModule(root, 'invoice', 'prisma'), /existe déjà/);
     assert.throws(
         () =>
             applyFileChanges(root, [
@@ -136,12 +136,12 @@ test('validates all transformations and destinations before staging', (t) => {
     assert.deepEqual(snapshot(root), before);
 });
 
-test('does not acquire or remove another invocation’s lock', (t) => {
+test('does not acquire or remove another invocation’s lock', async (t) => {
     const root = fixture(t);
     fs.mkdirSync(path.join(root, '.nestgen-transaction'));
     fs.writeFileSync(path.join(root, '.nestgen-transaction/owner'), 'other process');
     const before = snapshot(root);
-    assert.throws(() => generators['resource simple'](root), /EEXIST/);
+    await assert.rejects(() => generators['resource simple'](root), /EEXIST/);
     assert.deepEqual(snapshot(root), before);
 });
 

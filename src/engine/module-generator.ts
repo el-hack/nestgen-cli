@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { formatGeneratedCode } from './generated-code.js';
 import path from 'node:path';
 import ts from 'typescript';
 import { applyFileChanges, FileChange } from './file-transaction.js';
@@ -115,7 +116,7 @@ function prismaRuntimeChanges(projectRoot: string): FileChange[] {
             path: 'src/prisma/prisma.module.ts',
             operation: 'create',
             content:
-                "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
+                "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service.js';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
         },
     ];
 }
@@ -129,7 +130,7 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
     );
     result.set(
         `core/domain/ports/${resource.name}.repository.ts`,
-        `import { ${resource.pascal} } from '../entities/${resource.name}.entity';\n\nexport const ${token} = Symbol('${resource.pascal}RepositoryPort');\nexport interface ${resource.pascal}RepositoryPort { save(value: ${resource.pascal}): Promise<${resource.pascal}>; findById(id: string): Promise<${resource.pascal} | null>; }\n`,
+        `import { ${resource.pascal} } from '../entities/${resource.name}.entity.js';\n\nexport const ${token} = Symbol('${resource.pascal}RepositoryPort');\nexport interface ${resource.pascal}RepositoryPort { save(value: ${resource.pascal}): Promise<${resource.pascal}>; findById(id: string): Promise<${resource.pascal} | null>; }\n`,
     );
     result.set(
         `core/application/commands/create-${resource.name}.command.ts`,
@@ -137,7 +138,7 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
     );
     result.set(
         `core/application/commands/create-${resource.name}.handler.ts`,
-        `import { Inject } from '@nestjs/common';\nimport { CommandHandler, ICommandHandler } from '@nestjs/cqrs';\nimport { Create${resource.pascal}Command } from './create-${resource.name}.command';\nimport { ${resource.pascal} } from '../../domain/entities/${resource.name}.entity';\nimport { ${resource.pascal}RepositoryPort, ${token} } from '../../domain/ports/${resource.name}.repository';\n@CommandHandler(Create${resource.pascal}Command)\nexport class Create${resource.pascal}Handler implements ICommandHandler<Create${resource.pascal}Command> { constructor(@Inject(${token}) private readonly repository: ${resource.pascal}RepositoryPort) {} async execute(command: Create${resource.pascal}Command): Promise<string> { return (await this.repository.save(new ${resource.pascal}(undefined, command.name, command.email))).id!; } }\n`,
+        `import { Inject } from '@nestjs/common';\nimport { CommandHandler, ICommandHandler } from '@nestjs/cqrs';\nimport { Create${resource.pascal}Command } from './create-${resource.name}.command.js';\nimport { ${resource.pascal} } from '../../domain/entities/${resource.name}.entity.js';\nimport { ${resource.pascal}RepositoryPort, ${token} } from '../../domain/ports/${resource.name}.repository.js';\n@CommandHandler(Create${resource.pascal}Command)\nexport class Create${resource.pascal}Handler implements ICommandHandler<Create${resource.pascal}Command> { constructor(@Inject(${token}) private readonly repository: ${resource.pascal}RepositoryPort) {} async execute(command: Create${resource.pascal}Command): Promise<string> { return (await this.repository.save(new ${resource.pascal}(undefined, command.name, command.email))).id!; } }\n`,
     );
     result.set(
         `interfaces/dtos/create-${resource.name}.dto.ts`,
@@ -145,7 +146,7 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
     );
     result.set(
         `interfaces/controllers/${resource.name}.controller.ts`,
-        `import { Body, Controller, Post } from '@nestjs/common';\nimport { CommandBus } from '@nestjs/cqrs';\nimport { Create${resource.pascal}Command } from '../../core/application/commands/create-${resource.name}.command';\nimport { Create${resource.pascal}Dto } from '../dtos/create-${resource.name}.dto';\n@Controller('${resource.route}') export class ${resource.pascal}Controller { constructor(private readonly commandBus: CommandBus) {} @Post() async create(@Body() dto: Create${resource.pascal}Dto) { return { id: await this.commandBus.execute(new Create${resource.pascal}Command(dto.name, dto.email)) }; } }\n`,
+        `import { Body, Controller, Post } from '@nestjs/common';\nimport { CommandBus } from '@nestjs/cqrs';\nimport { Create${resource.pascal}Command } from '../../core/application/commands/create-${resource.name}.command.js';\nimport { Create${resource.pascal}Dto } from '../dtos/create-${resource.name}.dto.js';\n@Controller('${resource.route}') export class ${resource.pascal}Controller { constructor(private readonly commandBus: CommandBus) {} @Post() async create(@Body() dto: Create${resource.pascal}Dto) { return { id: await this.commandBus.execute(new Create${resource.pascal}Command(dto.name, dto.email)) }; } }\n`,
     );
     if (orm === 'typeorm') {
         result.set(
@@ -154,26 +155,26 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
         );
         result.set(
             `infrastructure/persistences/repositories/${resource.name}.typeorm.repository.ts`,
-            `import { Injectable } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { Repository } from 'typeorm';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository';\nimport { ${resource.pascal}Entity } from './${resource.name}.orm';\n@Injectable() export class ${resource.pascal}TypeOrmRepository implements ${resource.pascal}RepositoryPort { constructor(@InjectRepository(${resource.pascal}Entity) private readonly repository: Repository<${resource.pascal}Entity>) {} async save(value: ${resource.pascal}) { const saved = await this.repository.save(this.repository.create({ name: value.name, email: value.email })); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.repository.findOneBy({ id }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
+            `import { Injectable } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { Repository } from 'typeorm';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity.js';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository.js';\nimport { ${resource.pascal}Entity } from './${resource.name}.orm.js';\n@Injectable() export class ${resource.pascal}TypeOrmRepository implements ${resource.pascal}RepositoryPort { constructor(@InjectRepository(${resource.pascal}Entity) private readonly repository: Repository<${resource.pascal}Entity>) {} async save(value: ${resource.pascal}) { const saved = await this.repository.save(this.repository.create({ name: value.name, email: value.email })); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.repository.findOneBy({ id }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
         );
         result.set(
             `${resource.name}.module.ts`,
-            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository';\nimport { ${resource.pascal}Entity } from './infrastructure/persistences/repositories/${resource.name}.orm';\nimport { ${resource.pascal}TypeOrmRepository } from './infrastructure/persistences/repositories/${resource.name}.typeorm.repository';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller';\n@Module({ imports: [CqrsModule, TypeOrmModule.forFeature([${resource.pascal}Entity])], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}TypeOrmRepository }] }) export class ${resource.pascal}Module {}\n`,
+            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler.js';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository.js';\nimport { ${resource.pascal}Entity } from './infrastructure/persistences/repositories/${resource.name}.orm.js';\nimport { ${resource.pascal}TypeOrmRepository } from './infrastructure/persistences/repositories/${resource.name}.typeorm.repository.js';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller.js';\n@Module({ imports: [CqrsModule, TypeOrmModule.forFeature([${resource.pascal}Entity])], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}TypeOrmRepository }] }) export class ${resource.pascal}Module {}\n`,
         );
     } else {
         result.set(
             `infrastructure/persistences/repositories/${resource.name}.prisma.repository.ts`,
-            `import { Injectable } from '@nestjs/common';\nimport { PrismaService } from '../../../../../prisma/prisma.service';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository';\n@Injectable() export class ${resource.pascal}PrismaRepository implements ${resource.pascal}RepositoryPort { constructor(private readonly prisma: PrismaService) {} async save(value: ${resource.pascal}) { const saved = await this.prisma.${resource.camel}.create({ data: { name: value.name, email: value.email } }); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.prisma.${resource.camel}.findUnique({ where: { id } }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
+            `import { Injectable } from '@nestjs/common';\nimport { PrismaService } from '../../../../../prisma/prisma.service.js';\nimport { ${resource.pascal} } from '../../../core/domain/entities/${resource.name}.entity.js';\nimport { ${resource.pascal}RepositoryPort } from '../../../core/domain/ports/${resource.name}.repository.js';\n@Injectable() export class ${resource.pascal}PrismaRepository implements ${resource.pascal}RepositoryPort { constructor(private readonly prisma: PrismaService) {} async save(value: ${resource.pascal}) { const saved = await this.prisma.${resource.camel}.create({ data: { name: value.name, email: value.email } }); return new ${resource.pascal}(saved.id, saved.name, saved.email); } async findById(id: string) { const found = await this.prisma.${resource.camel}.findUnique({ where: { id } }); return found ? new ${resource.pascal}(found.id, found.name, found.email) : null; } }\n`,
         );
         result.set(
             `${resource.name}.module.ts`,
-            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { PrismaModule } from '../../prisma/prisma.module';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository';\nimport { ${resource.pascal}PrismaRepository } from './infrastructure/persistences/repositories/${resource.name}.prisma.repository';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller';\n@Module({ imports: [CqrsModule, PrismaModule], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}PrismaRepository }] }) export class ${resource.pascal}Module {}\n`,
+            `import { Module } from '@nestjs/common';\nimport { CqrsModule } from '@nestjs/cqrs';\nimport { PrismaModule } from '../../prisma/prisma.module.js';\nimport { Create${resource.pascal}Handler } from './core/application/commands/create-${resource.name}.handler.js';\nimport { ${token} } from './core/domain/ports/${resource.name}.repository.js';\nimport { ${resource.pascal}PrismaRepository } from './infrastructure/persistences/repositories/${resource.name}.prisma.repository.js';\nimport { ${resource.pascal}Controller } from './interfaces/controllers/${resource.name}.controller.js';\n@Module({ imports: [CqrsModule, PrismaModule], controllers: [${resource.pascal}Controller], providers: [Create${resource.pascal}Handler, { provide: ${token}, useClass: ${resource.pascal}PrismaRepository }] }) export class ${resource.pascal}Module {}\n`,
         );
     }
     return result;
 }
 
-export function generateModule(projectRoot: string, rawName: string, orm: Orm): void {
+export async function generateModule(projectRoot: string, rawName: string, orm: Orm): Promise<void> {
     if (orm !== 'typeorm' && orm !== 'prisma') throw new Error(`ORM non supporté : ${orm}.`);
     const resource = describe(rawName);
     projectRoot = inspectProject(projectRoot, orm).root;
@@ -190,7 +191,7 @@ export function generateModule(projectRoot: string, rawName: string, orm: Orm): 
         content: updateAppModule(
             appModule,
             `${resource.pascal}Module`,
-            `./app/${resource.name}/${resource.name}.module`,
+            `./app/${resource.name}/${resource.name}.module.js`,
         ),
     });
     if (orm === 'prisma') {
@@ -202,5 +203,5 @@ export function generateModule(projectRoot: string, rawName: string, orm: Orm): 
         });
         changes.push(...prismaRuntimeChanges(projectRoot));
     }
-    applyFileChanges(projectRoot, changes);
+    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
 }
