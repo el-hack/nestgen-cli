@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { AppModule } from './build/app.module.js';
 
@@ -12,6 +13,25 @@ app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbid
 await app.listen(0, '127.0.0.1');
 try {
     const api = request(app.getHttpServer());
+    step = 'document OpenAPI';
+    const document = SwaggerModule.createDocument(app, new DocumentBuilder().setTitle('E2E').build());
+    const productPath = document.paths['/catalog/products'];
+    const schema = document.components?.schemas?.CreateProductDto;
+    assert.ok(productPath?.post && productPath.get);
+    assert.equal(
+        productPath.get.parameters?.some((parameter) => parameter.name === 'page'),
+        true,
+    );
+    assert.equal(
+        productPath.get.parameters?.some((parameter) => parameter.name === 'limit'),
+        true,
+    );
+    assert.equal(schema?.required?.includes('sku'), true);
+    assert.equal(schema?.properties?.releasedAt.format, 'date-time');
+    assert.equal(schema?.properties?.reference.format, 'uuid');
+    assert.equal(schema?.properties?.releasedAt.nullable, true);
+    assert.equal(productPath.post.responses['201']?.description, 'Product créé.');
+    assert.equal(productPath.post.responses['409']?.description, 'Valeur unique déjà utilisée.');
     step = 'validation des identifiants pour les deux profils';
     for (const route of ['/catalog/products', '/simple-products']) {
         for (const method of ['get', 'patch', 'delete']) {

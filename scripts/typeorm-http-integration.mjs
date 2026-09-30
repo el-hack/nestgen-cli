@@ -64,6 +64,7 @@ try {
                     '@nestjs/core': '12.0.0',
                     '@nestjs/cqrs': '12.0.0',
                     '@nestjs/platform-express': '12.0.0',
+                    '@nestjs/swagger': '12.0.2',
                     '@nestjs/typeorm': '12.0.0',
                     'class-transformer': '0.5.1',
                     'class-validator': '0.14.0',
@@ -72,6 +73,7 @@ try {
                     'reflect-metadata': '0.2.2',
                     rxjs: '7.8.1',
                     supertest: '7.1.4',
+                    'swagger-ui-express': '5.0.1',
                     typeorm: '0.3.27',
                 },
                 devDependencies: {

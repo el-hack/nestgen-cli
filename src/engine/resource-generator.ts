@@ -59,12 +59,36 @@ function validationDecorators(field: ResourceField, optional: boolean): string[]
     return decorators;
 }
 
-function dtoFields(fields: ResourceField[], optional: boolean): string {
+function swaggerType(field: ResourceField): string {
+    return field.type === 'number' ? 'Number' : field.type === 'boolean' ? 'Boolean' : 'String';
+}
+
+function swaggerProperty(field: ResourceField, optional: boolean): string {
+    const required = !optional && !field.nullable;
+    const options = [`type: ${swaggerType(field)}`, `required: ${required}`, `example: ${sampleValue(field, true)}`];
+    if (field.nullable) options.push('nullable: true');
+    if (field.type === 'date') options.push("format: 'date-time'");
+    if (field.type === 'uuid') options.push("format: 'uuid'");
+    if (field.unique) options.push("description: 'Valeur unique.'");
+    return `@${required ? 'ApiProperty' : 'ApiPropertyOptional'}({ ${options.join(', ')} })`;
+}
+
+function swaggerImports(fields: ResourceField[], optional: boolean): string {
+    const decorators = new Set(
+        fields.map((field) => (!optional && !field.nullable ? 'ApiProperty' : 'ApiPropertyOptional')),
+    );
+    return [...decorators].sort().join(', ');
+}
+
+function dtoFields(fields: ResourceField[], optional: boolean, swagger = false): string {
     return fields
         .map((field) => {
             const isOptional = optional || field.nullable;
             const type = field.type === 'date' ? 'string' : typescriptType(field);
-            return `${validationDecorators(field, isOptional)
+            return `${swagger ? `    ${swaggerProperty(field, isOptional)}\n` : ''}${validationDecorators(
+                field,
+                isOptional,
+            )
                 .map((decorator) => `    ${decorator}`)
                 .join('\n')}\n    ${field.name}${isOptional ? '?' : '!'}: ${type}${field.nullable ? ' | null' : ''};`;
         })
@@ -285,6 +309,7 @@ function featureFiles(
     route: string,
     table: string,
     profile: ArchitectureProfile,
+    swagger: boolean,
 ): Map<string, string> {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map(entityColumn).join('\n\n');
@@ -296,11 +321,11 @@ function featureFiles(
     files.set('domain/' + name + '.ts', `export class ${className} {\n    id!: string;\n${domainProperties}\n}\n`);
     files.set(
         'dto/create-' + name + '.dto.ts',
-        `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`,
+        `import { ${validationImports(fields, false)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, false)} } from '@nestjs/swagger';\n` : ''}\nexport class Create${className}Dto {\n${dtoFields(fields, false, swagger)}\n}\n`,
     );
     files.set(
         'dto/update-' + name + '.dto.ts',
-        `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`,
+        `import { ${validationImports(fields, true)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, true)} } from '@nestjs/swagger';\n` : ''}\nexport class Update${className}Dto {\n${dtoFields(fields, true, swagger)}\n}\n`,
     );
     files.set(
         'dto/list-' + name + '.query.ts',
@@ -310,6 +335,23 @@ function featureFiles(
         'persistence/' + name + '.entity.ts',
         `import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';\n\n@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`,
     );
+    if (swagger) {
+        const queryPath = 'dto/list-' + name + '.query.ts';
+        const query = files.get(queryPath)!;
+        files.set(
+            queryPath,
+            `import { ApiPropertyOptional } from '@nestjs/swagger';\n` +
+                query
+                    .replace(
+                        '    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;',
+                        '    @ApiPropertyOptional({ minimum: 1, default: 1, example: 1 })\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;',
+                    )
+                    .replace(
+                        '    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;',
+                        '    @ApiPropertyOptional({ minimum: 1, maximum: MAX_PAGE_SIZE, default: 20, example: 20 })\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;',
+                    ),
+        );
+    }
     const persistenceImports = advanced
         ? `import { Injectable } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Input, Update${className}Input } from '../application/${name}.contract.js';\nimport { ${className}ConflictError, ${className}NotFoundError } from '../application/${name}.errors.js';\nimport { ${className}RepositoryPort } from '../application/ports/${name}.repository.port.js';\nimport { ${className} } from '../domain/${name}.js';\n`
         : `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className} } from '../domain/${name}.js';\n`;
@@ -341,7 +383,7 @@ function featureFiles(
             `import { Create${className}Input, ${className}Output, Update${className}Input } from './${name}.contract.js';\nimport { ${className}RepositoryPort } from './ports/${name}.repository.port.js';\nimport { ${className} } from '../domain/${name}.js';\n\nexport class ${className}Service {\n    constructor(private readonly repository: ${className}RepositoryPort) {}\n\n    async create(input: Create${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.create(input));\n    }\n\n    async findOne(id: string): Promise<${className}Output> {\n        return this.toOutput(await this.repository.findOne(id));\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}Output[]> {\n        return (await this.repository.findMany(skip, take)).map((value) => this.toOutput(value));\n    }\n\n    async update(id: string, input: Update${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.update(id, input));\n    }\n\n    remove(id: string): Promise<void> {\n        return this.repository.remove(id);\n    }\n\n    private toOutput(value: ${className}): ${className}Output {\n        return { id: value.id, ${fields.map((field) => `${field.name}: value.${field.name}`).join(', ')} };\n    }\n}\n`,
         );
     }
-    const controllerImports = advanced
+    let controllerImports = advanced
         ? `import { Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ${className}ConflictError, ${className}NotFoundError } from './application/${name}.errors.js';\nimport { ${className}Service } from './application/${name}.service.js';\n`
         : `import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n`;
     const controllerTarget = advanced ? 'service' : 'repository';
@@ -355,6 +397,36 @@ function featureFiles(
         name + '.controller.ts',
         `${controllerImports}import { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly ${controllerTarget}: ${controllerType}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.create(${createArgument})${advanced ? ')' : ''}; }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findMany(skip, query.limit)${advanced ? ')' : ''} };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findOne(id)${advanced ? ')' : ''}; }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.update(id, ${updateArgument})${advanced ? ')' : ''}; }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.remove(id)${advanced ? ')' : ''}; }${errorBoundary}}\n`,
     );
+    if (swagger) {
+        const controllerPath = name + '.controller.ts';
+        const controller = files.get(controllerPath)!;
+        files.set(
+            controllerPath,
+            `import { ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNoContentResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';\n` +
+                controller
+                    .replace(`@Controller('${route}')`, `@ApiTags('${route}')\n@Controller('${route}')`)
+                    .replace(
+                        '    @Post()\n',
+                        `    @ApiOperation({ summary: 'Créer ${name}' })\n    @ApiCreatedResponse({ description: '${className} créé.' })\n    @ApiBadRequestResponse({ description: 'Requête invalide.' })\n    @ApiConflictResponse({ description: 'Valeur unique déjà utilisée.' })\n    @Post()\n`,
+                    )
+                    .replace(
+                        '    @Get()\n',
+                        `    @ApiOperation({ summary: 'Lister ${name}' })\n    @ApiOkResponse({ description: 'Page de résultats.' })\n    @Get()\n`,
+                    )
+                    .replaceAll(
+                        "    @Get(':id')\n",
+                        `    @ApiParam({ name: 'id', format: 'uuid' })\n    @ApiOkResponse({ description: '${className} trouvé.' })\n    @ApiNotFoundResponse({ description: '${className} introuvable.' })\n    @Get(':id')\n`,
+                    )
+                    .replaceAll(
+                        "    @Patch(':id')\n",
+                        `    @ApiParam({ name: 'id', format: 'uuid' })\n    @ApiOkResponse({ description: '${className} mis à jour.' })\n    @ApiBadRequestResponse({ description: 'Requête invalide.' })\n    @ApiNotFoundResponse({ description: '${className} introuvable.' })\n    @Patch(':id')\n`,
+                    )
+                    .replace(
+                        "    @Delete(':id')\n",
+                        `    @ApiParam({ name: 'id', format: 'uuid' })\n    @ApiNoContentResponse({ description: '${className} supprimé.' })\n    @ApiNotFoundResponse({ description: '${className} introuvable.' })\n    @Delete(':id')\n`,
+                    ),
+        );
+    }
     files.set(
         name + '.module.ts',
         `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './application/ports/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, { provide: ${className}Service, useFactory: (repository: ${className}Repository) => new ${className}Service(repository), inject: [${className}RepositoryToken] }` : ''}],\n})\nexport class ${className}Module {}\n`,
@@ -384,7 +456,14 @@ export async function generateResource(projectRoot: string, options: Options): P
     availableFeatureDirectory(projectRoot, name);
     const appModulePath = project.appModulePath;
 
-    const files = featureFiles(name, className, options.fields, options.route, options.table, profile);
+    const manifest = JSON.parse(fs.readFileSync(projectPath(projectRoot, 'package.json'), 'utf8')) as {
+        dependencies?: Record<string, unknown>;
+        devDependencies?: Record<string, unknown>;
+    };
+    const swagger = Boolean(
+        manifest.dependencies?.['@nestjs/swagger'] ?? manifest.devDependencies?.['@nestjs/swagger'],
+    );
+    const files = featureFiles(name, className, options.fields, options.route, options.table, profile, swagger);
     const restTest = generatedRestTest(name, className, options.fields, options.route);
     const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(
