@@ -28,7 +28,7 @@ The repository CI validates linting, formatting, generator contracts, a Prisma i
 
 ## Quickstart — TypeORM resource
 
-The following flow is the supported end-to-end TypeORM path. It uses Docker for PostgreSQL and creates an explicit migration.
+The following flow is the supported end-to-end TypeORM path. Prerequisites: Node.js `>=24.15.0 <27`, npm 11 and Docker with Compose. It uses Docker for PostgreSQL and creates an explicit migration.
 
 ```bash
 npm install --global nestgen-cli
@@ -65,9 +65,21 @@ curl --request POST http://localhost:3000/catalog/products \
   --data '{"sku":"sku-001","price":19.9,"published":true}'
 
 curl 'http://localhost:3000/catalog/products?page=1&limit=20'
+
+# Swagger UI, when selected during init
+open http://localhost:3000/api
+
+# Generated unit and database-backed REST tests
+npm test
+docker compose -f test/compose.e2e.yaml up -d --wait
+npm run test:e2e -- product.e2e-spec.ts
+docker compose -f test/compose.e2e.yaml down -v
+
+# Stop the development database when finished
+docker compose down -v
 ```
 
-A duplicate `sku` returns HTTP `409`; a malformed `price` returns HTTP `400`; an unknown identifier returns HTTP `404`. Run the generated project tests with `npm test` and stop the local database with `docker compose down`.
+A duplicate `sku` returns HTTP `409`; a malformed `price` returns HTTP `400`; an unknown identifier returns HTTP `404`. The REST test database runs separately on `127.0.0.1:5433`, is reset during the test suite and is removed by the cleanup command. On Windows, open `http://localhost:3000/api` in a browser instead of using `open`.
 
 ### English quickstart
 
