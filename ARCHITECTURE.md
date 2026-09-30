@@ -13,3 +13,9 @@ Les scripts Bash d’initialisation restent une couche de compatibilité pendant
 ## Évaluation des Nest schematics
 
 Les schematics Nest sont adaptés à des ressources Nest conventionnelles, mais ne modélisent pas le contrat hexagonal de NestGen (ports, tokens d’injection, CQRS et adaptateurs ORM). Les adopter imposerait des transformations correctives fragiles après génération. Le moteur conserve donc des templates versionnés et une transformation AST ciblée ; il pourra appeler un schematic à l’avenir uniquement pour une cible compatible, derrière une interface de processus sans shell.
+
+## Préflight commun
+
+Modules et ressources vérifient la même structure avant toute écriture : application autonome à la racine, `src/app.module.ts`, `sourceRoot: "src"` (ou absent), manifeste JSON valide et dépendances du générateur sélectionné. CQRS est requis pour les modules CQRS, pas pour les ressources REST. Les workspaces, racines personnalisées et métadonnées AppModule dynamiques (imports non littéraux, spread, clés calculées, imports dupliqués) sont refusés avec un diagnostic explicite.
+
+La racine fournie est résolue une fois vers son chemin réel. Dans cette racine, les chemins d'entrée et de destination contrôlés refusent tout lien symbolique, y compris interne ou pendant, avant lecture ou mutation ; les fichiers et répertoires existants d'une fonctionnalité ne sont jamais réutilisés silencieusement. La même validation de confinement est réappliquée au plan d'écriture. Les tests communs vérifient le contenu et les permissions du projet, les liens et leurs cibles externes après refus. Ces vérifications supposent que le projet n'est pas modifié simultanément par un autre processus pendant la génération.
