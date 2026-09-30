@@ -88,6 +88,44 @@ function propertyMap(fields: ResourceField[]): string {
         .join(', ');
 }
 
+function applicationInputMap(fields: ResourceField[], optional: boolean): string {
+    return fields
+        .map((field) => {
+            const value = `dto.${field.name}`;
+            const converted = field.type === 'date' ? `${value} === null ? null : new Date(${value})` : value;
+            return optional || field.nullable
+                ? `...(${value} === undefined ? {} : { ${field.name}: ${converted} })`
+                : `${field.name}: ${converted}`;
+        })
+        .join(', ');
+}
+
+function applicationContractFields(fields: ResourceField[], optional: boolean): string {
+    return fields
+        .map(
+            (field) =>
+                `    ${field.name}${optional || field.nullable ? '?' : ''}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`,
+        )
+        .join('\n');
+}
+
+function applicationContract(
+    name: string,
+    className: string,
+    fields: ResourceField[],
+): { path: string; content: string } {
+    const create = applicationContractFields(fields, false);
+    const update = applicationContractFields(fields, true);
+    const output = applicationContractFields(fields, false);
+    return {
+        path: `application/${name}.contract.ts`,
+        content:
+            `export interface Create${className}Input {\n${create}\n}\n\n` +
+            `export interface Update${className}Input {\n${update}\n}\n\n` +
+            `export interface ${className}Output {\n    id: string;\n${output}\n}\n`,
+    };
+}
+
 function featureFiles(
     name: string,
     className: string,
@@ -120,27 +158,54 @@ function featureFiles(
         'persistence/' + name + '.entity.ts',
         `import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';\n\n@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`,
     );
+    const persistenceImports = advanced
+        ? `import { Injectable } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Input, Update${className}Input } from '../application/${name}.contract.js';\nimport { ${className}ConflictError, ${className}NotFoundError } from '../application/${name}.errors.js';\nimport { ${className}RepositoryPort } from '../application/ports/${name}.repository.port.js';\nimport { ${className} } from '../domain/${name}.js';\n`
+        : `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className} } from '../domain/${name}.js';\n`;
+    const persistenceInputTypes = advanced ? `Create${className}Input` : `Create${className}Dto`;
+    const persistenceUpdateTypes = advanced ? `Update${className}Input` : `Update${className}Dto`;
+    const missingError = advanced
+        ? `new ${className}NotFoundError('${className} introuvable')`
+        : `new NotFoundException('${className} introuvable')`;
+    const conflictError = advanced
+        ? `new ${className}ConflictError('Une ressource avec cette valeur unique existe déjà.')`
+        : `new ConflictException('Une ressource avec cette valeur unique existe déjà.')`;
     files.set(
         'persistence/' + name + '.repository.ts',
-        `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { InjectRepository } from '@nestjs/typeorm';\nimport { QueryFailedError, Repository } from 'typeorm';\nimport { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className} } from '../domain/${name}.js';\n${advanced ? `import { ${className}RepositoryPort } from '../domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: Create${className}Dto): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw new NotFoundException('${className} introuvable');\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: Update${className}Dto): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw new NotFoundException('${className} introuvable');\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        const result = await this.repository.delete(id);\n        if (!result.affected) throw new NotFoundException('${className} introuvable');\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw new ConflictException('Une ressource avec cette valeur unique existe déjà.');\n        throw error;\n    }\n}\n`,
+        `${persistenceImports}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: ${persistenceInputTypes}): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw ${missingError};\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: ${persistenceUpdateTypes}): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw ${missingError};\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        const result = await this.repository.delete(id);\n        if (!result.affected) throw ${missingError};\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw ${conflictError};\n        throw error;\n    }\n}\n`,
     );
     if (advanced) {
+        const contract = applicationContract(name, className, fields);
+        files.set(contract.path, contract.content);
         files.set(
-            'domain/' + name + '.repository.port.ts',
-            `import { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className} } from './${name}.js';\n\nexport const ${className}RepositoryToken = Symbol('${className}RepositoryPort');\nexport interface ${className}RepositoryPort { create(input: Create${className}Dto): Promise<${className}>; findOne(id: string): Promise<${className}>; findMany(skip: number, take: number): Promise<${className}[]>; update(id: string, input: Update${className}Dto): Promise<${className}>; remove(id: string): Promise<void>; }\n`,
+            `application/${name}.errors.ts`,
+            `export class ${className}NotFoundError extends Error {\n    constructor(message = '${className} introuvable') {\n        super(message);\n        this.name = '${className}NotFoundError';\n    }\n}\n\nexport class ${className}ConflictError extends Error {\n    constructor(message = 'Une ressource avec cette valeur unique existe déjà.') {\n        super(message);\n        this.name = '${className}ConflictError';\n    }\n}\n`,
         );
         files.set(
-            'application/' + name + '.service.ts',
-            `import { Inject, Injectable } from '@nestjs/common';\nimport { Create${className}Dto } from '../dto/create-${name}.dto.js';\nimport { Update${className}Dto } from '../dto/update-${name}.dto.js';\nimport { ${className}RepositoryPort, ${className}RepositoryToken } from '../domain/${name}.repository.port.js';\n\n@Injectable() export class ${className}Service { constructor(@Inject(${className}RepositoryToken) private readonly repository: ${className}RepositoryPort) {} create(input: Create${className}Dto) { return this.repository.create(input); } findOne(id: string) { return this.repository.findOne(id); } findMany(skip: number, take: number) { return this.repository.findMany(skip, take); } update(id: string, input: Update${className}Dto) { return this.repository.update(id, input); } remove(id: string) { return this.repository.remove(id); } }\n`,
+            `application/ports/${name}.repository.port.ts`,
+            `import { Create${className}Input, Update${className}Input } from '../${name}.contract.js';\nimport { ${className} } from '../../domain/${name}.js';\n\nexport const ${className}RepositoryToken = Symbol('${className}RepositoryPort');\n\nexport interface ${className}RepositoryPort {\n    create(input: Create${className}Input): Promise<${className}>;\n    findOne(id: string): Promise<${className}>;\n    findMany(skip: number, take: number): Promise<${className}[]>;\n    update(id: string, input: Update${className}Input): Promise<${className}>;\n    remove(id: string): Promise<void>;\n}\n`,
+        );
+        files.set(
+            `application/${name}.service.ts`,
+            `import { Create${className}Input, ${className}Output, Update${className}Input } from './${name}.contract.js';\nimport { ${className}RepositoryPort } from './ports/${name}.repository.port.js';\nimport { ${className} } from '../domain/${name}.js';\n\nexport class ${className}Service {\n    constructor(private readonly repository: ${className}RepositoryPort) {}\n\n    async create(input: Create${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.create(input));\n    }\n\n    async findOne(id: string): Promise<${className}Output> {\n        return this.toOutput(await this.repository.findOne(id));\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}Output[]> {\n        return (await this.repository.findMany(skip, take)).map((value) => this.toOutput(value));\n    }\n\n    async update(id: string, input: Update${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.update(id, input));\n    }\n\n    remove(id: string): Promise<void> {\n        return this.repository.remove(id);\n    }\n\n    private toOutput(value: ${className}): ${className}Output {\n        return { id: value.id, ${fields.map((field) => `${field.name}: value.${field.name}`).join(', ')} };\n    }\n}\n`,
         );
     }
+    const controllerImports = advanced
+        ? `import { Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ${className}ConflictError, ${className}NotFoundError } from './application/${name}.errors.js';\nimport { ${className}Service } from './application/${name}.service.js';\n`
+        : `import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n`;
+    const controllerTarget = advanced ? 'service' : 'repository';
+    const controllerType = advanced ? `${className}Service` : `${className}Repository`;
+    const createArgument = advanced ? `{ ${applicationInputMap(fields, false)} }` : 'dto';
+    const updateArgument = advanced ? `{ ${applicationInputMap(fields, true)} }` : 'dto';
+    const errorBoundary = advanced
+        ? `\n    private async respond<T>(operation: Promise<T>): Promise<T> {\n        try {\n            return await operation;\n        } catch (error) {\n            if (error instanceof ${className}NotFoundError) throw new NotFoundException(error.message);\n            if (error instanceof ${className}ConflictError) throw new ConflictException(error.message);\n            throw error;\n        }\n    }\n`
+        : '';
     files.set(
         name + '.controller.ts',
-        `import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}${advanced ? 'Service' : 'Repository'} } from './${advanced ? 'application/' + name + '.service' : 'persistence/' + name + '.repository'}.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}${advanced ? 'Service' : 'Repository'}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await this.repository.findMany(skip, query.limit) };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await this.repository.remove(id); }\n}\n`,
+        `${controllerImports}import { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly ${controllerTarget}: ${controllerType}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.create(${createArgument})${advanced ? ')' : ''}; }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findMany(skip, query.limit)${advanced ? ')' : ''} };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findOne(id)${advanced ? ')' : ''}; }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.update(id, ${updateArgument})${advanced ? ')' : ''}; }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.remove(id)${advanced ? ')' : ''}; }${errorBoundary}}\n`,
     );
     files.set(
         name + '.module.ts',
-        `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './domain/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, ${className}Service` : ''}],\n})\nexport class ${className}Module {}\n`,
+        `import { Module } from '@nestjs/common';\nimport { TypeOrmModule } from '@nestjs/typeorm';\nimport { ${className}Controller } from './${name}.controller.js';\n${advanced ? `import { ${className}Service } from './application/${name}.service.js';\nimport { ${className}RepositoryToken } from './application/ports/${name}.repository.port.js';\n` : ''}import { ${className}Entity } from './persistence/${name}.entity.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({\n    imports: [TypeOrmModule.forFeature([${className}Entity])],\n    controllers: [${className}Controller],\n    providers: [${className}Repository${advanced ? `, { provide: ${className}RepositoryToken, useExisting: ${className}Repository }, { provide: ${className}Service, useFactory: (repository: ${className}Repository) => new ${className}Service(repository), inject: [${className}RepositoryToken] }` : ''}],\n})\nexport class ${className}Module {}\n`,
     );
     return files;
 }
