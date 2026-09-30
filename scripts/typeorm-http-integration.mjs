@@ -45,7 +45,11 @@ try {
                 name: 'nestgen-typeorm-http-integration',
                 private: true,
                 type: 'module',
-                scripts: { test: 'node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand' },
+                scripts: {
+                    test: 'node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand',
+                    'test:e2e':
+                        'node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --config ./test/jest-e2e.json',
+                },
                 jest: {
                     moduleFileExtensions: ['js', 'json', 'ts'],
                     rootDir: 'src',
@@ -63,6 +67,7 @@ try {
                     '@nestjs/typeorm': '12.0.0',
                     'class-transformer': '0.5.1',
                     'class-validator': '0.14.0',
+                    dotenv: '16.6.1',
                     pg: '8.16.3',
                     'reflect-metadata': '0.2.2',
                     rxjs: '7.8.1',
@@ -72,6 +77,8 @@ try {
                 devDependencies: {
                     '@types/jest': '29.5.14',
                     '@types/node': '24.19.0',
+                    '@types/supertest': '6.0.3',
+                    '@nestjs/testing': '12.0.0',
                     jest: '29.7.0',
                     'ts-jest': '29.2.6',
                     typescript: '5.9.3',
@@ -102,6 +109,19 @@ try {
                 types: ['node', 'jest'],
             },
             include: ['src/**/*.ts'],
+        }),
+    );
+    fs.mkdirSync(path.join(root, 'test'), { recursive: true });
+    fs.writeFileSync(
+        path.join(root, 'test', 'jest-e2e.json'),
+        JSON.stringify({
+            moduleFileExtensions: ['js', 'json', 'ts'],
+            rootDir: '..',
+            testRegex: 'test/.*\\.e2e-spec\\.ts$',
+            extensionsToTreatAsEsm: ['.ts'],
+            transform: { '^.+\\.ts$': ['ts-jest', { useESM: true }] },
+            moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+            testEnvironment: 'node',
         }),
     );
     run('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund']);
@@ -158,6 +178,13 @@ try {
     const port = run('docker', ['port', postgresContainer, '5432/tcp']).stdout.trim().split(':').at(-1);
     if (!port) throw new Error('Port PostgreSQL introuvable.');
     waitForPostgres();
+    run('npm', ['run', 'test:e2e', '--', 'product.e2e-spec.ts'], root, {
+        DATABASE_HOST: '127.0.0.1',
+        DATABASE_PORT: port,
+        DATABASE_USER: 'nestgen',
+        DATABASE_PASSWORD: 'nestgen',
+        DATABASE_TEST_NAME: 'nestgen',
+    });
     for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;
         const file = path.join(entry.parentPath, entry.name);
