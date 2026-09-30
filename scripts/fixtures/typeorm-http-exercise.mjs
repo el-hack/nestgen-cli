@@ -8,7 +8,8 @@ import { AppModule } from './build/app.module.js';
 let step = 'initialisation de NestJS';
 const app = await NestFactory.create(AppModule, { logger: false });
 app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
-await app.init();
+// Keep one loopback listener for the complete scenario instead of reopening an ephemeral server per request.
+await app.listen(0, '127.0.0.1');
 try {
     const api = request(app.getHttpServer());
     step = 'validation des identifiants pour les deux profils';
