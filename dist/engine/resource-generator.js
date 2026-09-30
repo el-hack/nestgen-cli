@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
-import { availableFeatureDirectory } from './project-path.js';
+import { availableFeatureDirectory, projectPath } from './project-path.js';
 import { applyFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
@@ -123,6 +123,126 @@ function generatedUnitTest(name, className, fields, advanced) {
         content: `import { ConflictException, NotFoundException } from '@nestjs/common';\nimport { QueryFailedError } from 'typeorm';\nimport { ${className}Repository } from './${name}.repository.js';\n\ndescribe('${className} repository', () => {\n    const input = { ${transportInput} };\n    const entity = { id: '00000000-0000-4000-8000-000000000001', ${applicationInput} };\n    const persistence = {\n        create: jest.fn((value) => value),\n        save: jest.fn(),\n        findOneBy: jest.fn(),\n        find: jest.fn(),\n        preload: jest.fn(),\n        delete: jest.fn(),\n    };\n    const repository = new ${className}Repository(persistence as never);\n\n    beforeEach(() => jest.resetAllMocks());\n\n    it('persists valid input and returns the domain value', async () => {\n        persistence.save.mockResolvedValue(entity);\n\n        await expect(repository.create(input)).resolves.toMatchObject(entity);\n        expect(persistence.create).toHaveBeenCalledWith(expect.objectContaining({ ${applicationInput} }));\n    });\n\n    it('reports an absent resource', async () => {\n        persistence.findOneBy.mockResolvedValue(null);\n\n        await expect(repository.findOne(entity.id)).rejects.toBeInstanceOf(NotFoundException);\n    });\n\n    it('reports a uniqueness conflict from persistence', async () => {\n        const driverError = Object.assign(new Error('duplicate'), { code: '23505' });\n        persistence.save.mockRejectedValue(new QueryFailedError('INSERT', [], driverError));\n\n        await expect(repository.create(input)).rejects.toBeInstanceOf(ConflictException);\n    });\n});\n`,
     };
 }
+function updatedTestValue(field) {
+    if (field.type === 'number')
+        return '84';
+    if (field.type === 'boolean')
+        return 'false';
+    if (field.type === 'date')
+        return "'2026-02-03T04:05:06.000Z'";
+    if (field.type === 'uuid')
+        return "'00000000-0000-4000-8000-000000000456'";
+    return `'${field.name}-updated'`;
+}
+function invalidTestValue(field) {
+    if (field.type === 'number')
+        return "'invalid-number'";
+    if (field.type === 'boolean')
+        return "'invalid-boolean'";
+    if (field.type === 'date')
+        return "'invalid-date'";
+    if (field.type === 'uuid')
+        return "'invalid-uuid'";
+    return '42';
+}
+function generatedRestTest(name, className, fields, route) {
+    const input = testInput(fields, true);
+    const firstField = fields[0];
+    const uniqueField = fields.find((field) => field.unique);
+    const update = `${firstField.name}: ${updatedTestValue(firstField)}`;
+    const invalid = `${firstField.name}: ${invalidTestValue(firstField)}`;
+    const duplicateTest = uniqueField
+        ? `\n    it('returns 409 when a unique value already exists', async () => {\n        await api.post('/${route}').send(input).expect(201);\n        await api.post('/${route}').send(input).expect(409);\n    });\n`
+        : '';
+    return {
+        path: `test/${name}.e2e-spec.ts`,
+        content: `import 'reflect-metadata';
+import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { beforeAll, beforeEach, afterAll, describe, expect, it } from '@jest/globals';
+import { config } from 'dotenv';
+import { resolve } from 'node:path';
+import request from 'supertest';
+import { DataSource } from 'typeorm';
+
+config({ path: resolve(process.cwd(), 'test/.env.e2e') });
+
+const testDatabase = process.env.DATABASE_TEST_NAME;
+if (!testDatabase) throw new Error('DATABASE_TEST_NAME est requis pour les tests E2E.');
+if (testDatabase === process.env.DATABASE_NAME)
+    throw new Error('DATABASE_TEST_NAME doit être différent de DATABASE_NAME.');
+process.env.DATABASE_NAME = testDatabase;
+
+describe('${className} REST', () => {
+    let app: INestApplication;
+    let database: DataSource;
+    let api: ReturnType<typeof request>;
+    const input = { ${input} };
+
+    beforeAll(async () => {
+        const { AppModule } = await import('../src/app.module.js');
+        const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+        app = module.createNestApplication();
+        app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
+        await app.init();
+        database = app.get(DataSource);
+        api = request(app.getHttpServer());
+    });
+
+    beforeEach(async () => {
+        await database.synchronize(true);
+    });
+
+    afterAll(async () => {
+        try {
+            await database?.dropDatabase();
+        } finally {
+            await app?.close();
+        }
+    });
+
+    it('creates, reads, partially updates, paginates and deletes a resource', async () => {
+        const created = await api.post('/${route}').send(input).expect(201);
+        expect(created.body).toEqual(expect.objectContaining(input));
+
+        const found = await api.get('/${route}/' + created.body.id).expect(200);
+        expect(found.body).toEqual(expect.objectContaining(input));
+        await api.patch('/${route}/' + created.body.id).send({ ${update} }).expect(200);
+        const updated = await api.get('/${route}/' + created.body.id).expect(200);
+        expect(updated.body).toEqual(expect.objectContaining({ ...input, ${update} }));
+        const listed = await api.get('/${route}?page=1&limit=1').expect(200);
+        expect(listed.body).toMatchObject({ page: 1, limit: 1 });
+        expect(listed.body.data).toHaveLength(1);
+        await api.delete('/${route}/' + created.body.id).expect(204);
+        await api.get('/${route}/' + created.body.id).expect(404);
+    });
+
+    it('rejects invalid input, malformed UUIDs and missing resources', async () => {
+        await api.post('/${route}').send({ ...input, ${invalid} }).expect(400);
+        await api.get('/${route}/not-a-uuid').expect(400);
+        await api.get('/${route}/00000000-0000-4000-8000-000000000001').expect(404);
+    });${duplicateTest}});
+`,
+    };
+}
+function e2eSupportFiles(projectRoot) {
+    const files = new Map();
+    const support = new Map([
+        [
+            'test/.env.e2e',
+            'DATABASE_HOST=127.0.0.1\nDATABASE_PORT=5433\nDATABASE_USER=nestgen\nDATABASE_PASSWORD=nestgen\nDATABASE_TEST_NAME=nestgen_e2e\n',
+        ],
+        [
+            'test/compose.e2e.yaml',
+            `services:\n    postgres-e2e:\n        image: postgres:16-alpine\n        environment:\n            POSTGRES_DB: nestgen_e2e\n            POSTGRES_USER: nestgen\n            POSTGRES_PASSWORD: nestgen\n        ports:\n            - '127.0.0.1:5433:5432'\n        healthcheck:\n            test: ['CMD-SHELL', 'pg_isready -U nestgen -d nestgen_e2e']\n            interval: 2s\n            timeout: 3s\n            retries: 30\n`,
+        ],
+    ]);
+    for (const [file, content] of support) {
+        if (!fs.existsSync(projectPath(projectRoot, file)))
+            files.set(file, content);
+    }
+    return files;
+}
 function featureFiles(name, className, fields, route, table, profile) {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map(entityColumn).join('\n\n');
@@ -190,12 +310,16 @@ export async function generateResource(projectRoot, options) {
     availableFeatureDirectory(projectRoot, name);
     const appModulePath = project.appModulePath;
     const files = featureFiles(name, className, options.fields, options.route, options.table, profile);
+    const restTest = generatedRestTest(name, className, options.fields, options.route);
+    const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
     const changes = [...files].map(([relative, content]) => ({
         path: `src/app/${name}/${relative}`,
         content,
         operation: 'create',
     }));
+    changes.push({ path: restTest.path, content: restTest.content, operation: 'create' });
+    changes.push(...[...e2eSupport].map(([file, content]) => ({ path: file, content, operation: 'create' })));
     changes.push({
         path: `src/app/${name}/resource.json`,
         content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,

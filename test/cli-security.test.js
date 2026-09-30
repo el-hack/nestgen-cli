@@ -107,6 +107,13 @@ test('generates a product resource from its business fields', async () => {
     const unitTest = fs.readFileSync(path.join(root, 'persistence', 'product.repository.spec.ts'), 'utf8');
     assert.match(unitTest, /persists valid input/);
     assert.match(unitTest, /uniqueness conflict/);
+    const restTest = fs.readFileSync(path.join(fixturePath, 'test', 'product.e2e-spec.ts'), 'utf8');
+    assert.match(restTest, /DATABASE_TEST_NAME/);
+    assert.match(restTest, /database\.synchronize\(true\)/);
+    assert.match(restTest, /malformed UUIDs and missing resources/);
+    assert.match(restTest, /unique value already exists/);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'test', '.env.e2e'), 'utf8'), /DATABASE_TEST_NAME=nestgen_e2e/);
+    assert.match(fs.readFileSync(path.join(fixturePath, 'test', 'compose.e2e.yaml'), 'utf8'), /postgres-e2e/);
     assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
     assert.match(fs.readFileSync(path.join(root, 'product.module.ts'), 'utf8'), /TypeOrmModule\.forFeature/);
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
