@@ -43,6 +43,7 @@ try {
             {
                 name: 'nestgen-prisma-integration',
                 private: true,
+                type: 'module',
                 dependencies: {
                     '@nestjs/common': '12.0.0',
                     '@nestjs/core': '12.0.0',
@@ -112,6 +113,33 @@ try {
         fields: parseResourceFields(['email:string!']),
     });
     await generateResource(root, {
+        name: 'role',
+        route: 'roles',
+        table: 'roles',
+        orm: 'prisma',
+        fields: parseResourceFields(['name:string!']),
+    });
+    await generateResource(root, {
+        name: 'user',
+        route: 'users',
+        table: 'users',
+        orm: 'prisma',
+        fields: parseResourceFields(['email:string!']),
+        relations: parseResourceRelations([{ type: 'manyToMany', target: 'role' }]),
+    });
+    await generateResource(root, {
+        name: 'membership',
+        route: 'memberships',
+        table: 'memberships',
+        orm: 'prisma',
+        fields: parseResourceFields(['scope:string']),
+        indexes: [{ fields: ['userId', 'roleId'], unique: true }],
+        relations: parseResourceRelations([
+            { type: 'belongsTo', target: 'user' },
+            { type: 'belongsTo', target: 'role' },
+        ]),
+    });
+    await generateResource(root, {
         name: 'order',
         route: 'orders',
         table: 'orders',
@@ -163,6 +191,11 @@ try {
     }
     run('npx', ['tsc']);
     run(process.execPath, ['persist.mjs']);
+    fs.writeFileSync(
+        path.join(root, 'many-to-many.mjs'),
+        "import 'reflect-metadata';\nimport { ConflictException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { MembershipRepository } from './build/app/membership/persistence/membership.repository.js';\nimport { PrismaService } from './build/prisma/prisma.service.js';\nimport { RoleRepository } from './build/app/role/persistence/role.repository.js';\nimport { UserRepository } from './build/app/user/persistence/user.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const roles = app.get(RoleRepository); const users = app.get(UserRepository); const memberships = app.get(MembershipRepository); const prisma = app.get(PrismaService); const role = await roles.create({ name: 'admin' }); const user = await users.create({ email: 'user@example.test' }); await users.attachRoles(user.id, role.id); const associated = await prisma.user.findUnique({ where: { id: user.id }, include: { roles: true } }); if (associated?.roles.map((entry) => entry.id).join() !== role.id) throw new Error('many-to-many association was not persisted'); await users.detachRoles(user.id, role.id); const detached = await prisma.user.findUnique({ where: { id: user.id }, include: { roles: true } }); if (detached?.roles.length !== 0) throw new Error('many-to-many association was not removed'); const membership = await memberships.create({ userId: user.id, roleId: role.id, scope: 'admin' }); await memberships.create({ userId: user.id, roleId: role.id, scope: 'editor' }).then(() => { throw new Error('duplicate membership was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await memberships.remove(membership.id); await roles.findOne(role.id); await users.remove(user.id); await roles.remove(role.id); } finally { await app.close(); }\n",
+    );
+    run(process.execPath, ['many-to-many.mjs']);
 } finally {
     spawnSync('docker', ['rm', '--force', postgresContainer], { encoding: 'utf8' });
     if (process.env.NESTGEN_KEEP_PRISMA_E2E) console.error(`Prisma integration workspace: ${root}`);

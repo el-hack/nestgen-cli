@@ -115,7 +115,7 @@ NestGen refuse les combinaisons incompatibles, les bornes inversées et les inde
 
 ## Définition de ressource dans un fichier
 
-`nestgen resource --file product.resource.json` lit un JSON versionné. La version actuelle est `1`. Les options de ligne de commande (`<name>`, `--fields`, `--route`, `--table`, `--orm`, `--profile`, `--indexes`) remplacent la valeur du fichier lorsqu’elles sont présentes.
+`nestgen resource --file product.resource.json` lit un JSON versionné. La version actuelle est `1`. Les options de ligne de commande (`<name>`, `--fields`, `--route`, `--table`, `--orm`, `--profile`, `--indexes`) remplacent la valeur du fichier lorsqu’elles sont présentes. Ajoutez `uniqueIndexes` au fichier pour les contraintes d’unicité composites, par exemple `"uniqueIndexes": ["userId+roleId"]`.
 
 ```json
 {
@@ -156,6 +156,19 @@ Une relation est déclarée dans le fichier de définition de la ressource enfan
 ```
 
 `field` et `inverse` sont optionnels : NestGen utilise le nom de la ressource cible et un pluriel du nom de la ressource enfant. `nullable` vaut `false` par défaut et `onDelete` vaut `RESTRICT`; les suppressions liées ne déclenchent donc aucune cascade implicite. `SET NULL` est accepté seulement avec `nullable: true`.
+
+`manyToMany` crée une table de liaison avec ses deux clés étrangères et une contrainte d’unicité sur la paire. La ressource qui déclare la relation en est propriétaire et reçoit les routes `POST /<ressource>/:id/<relation>/:targetId` et `DELETE /<ressource>/:id/<relation>/:targetId` pour associer et dissocier sans supprimer les deux entités.
+
+```json
+{
+    "version": 1,
+    "name": "user",
+    "fields": ["email:string!"],
+    "relations": [{ "type": "manyToMany", "target": "role", "field": "roles", "inverse": "users" }]
+}
+```
+
+Lorsqu’une association porte ses propres données métier, générez-la comme ressource explicite avec deux relations `belongsTo`, puis protégez le couple de clés avec `uniqueIndexes`. Par exemple, une ressource `membership` peut définir `userId`, `roleId` et `grantedAt`, avec `"uniqueIndexes": ["userId+roleId"]`. Cette forme permet de versionner et valider les attributs de l’association, ce que la table de liaison implicite ne fait pas.
 
 On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
 `null` clears only nullable fields and is rejected for other fields. Values such as

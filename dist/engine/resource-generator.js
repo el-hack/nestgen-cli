@@ -28,7 +28,7 @@ function plural(value) {
     return `${value}s`;
 }
 function relationField(relation) {
-    return relation.field ?? camel(relation.target);
+    return relation.field ?? (relation.type === 'manyToMany' ? plural(camel(relation.target)) : camel(relation.target));
 }
 function relationIdField(relation) {
     return `${relationField(relation)}Id`;
@@ -36,16 +36,22 @@ function relationIdField(relation) {
 function relationName(relation, className) {
     return `${relation.targetClassName}${className}${pascal(relation.field)}`;
 }
+function joinTableName(table, relation) {
+    const value = `join_${table}_${relation.targetTable}_${relation.field}`;
+    return value.length <= 63 ? value : `${value.slice(0, 54)}_${stableSuffix(value)}`;
+}
 function resolveRelations(projectRoot, name, orm, fields, relations) {
     const knownFields = new Set(fields.map((field) => field.name));
     const resolved = (relations ?? []).map((relation) => {
         if (relation.target === name)
-            throw new Error('Une ressource ne peut pas se référencer elle-même avec belongsTo.');
+            throw new Error('Une ressource ne peut pas se référencer elle-même avec une relation générée.');
         const field = relationField(relation);
-        const idField = relationIdField(relation);
-        if (knownFields.has(idField))
-            throw new Error(`Le champ ${idField} est réservé à la relation vers ${relation.target}.`);
-        knownFields.add(idField);
+        if (relation.type === 'belongsTo') {
+            const idField = relationIdField(relation);
+            if (knownFields.has(idField))
+                throw new Error(`Le champ ${idField} est réservé à la relation vers ${relation.target}.`);
+            knownFields.add(idField);
+        }
         const resourcePath = projectPath(projectRoot, `src/app/${relation.target}/resource.json`);
         if (!fs.existsSync(resourcePath))
             throw new Error(`La ressource cible ${relation.target} est introuvable. Générez-la avant la relation.`);
@@ -59,7 +65,7 @@ function resolveRelations(projectRoot, name, orm, fields, relations) {
         if (!target || typeof target !== 'object' || target.orm !== orm)
             throw new Error(`La ressource cible ${relation.target} doit utiliser l'ORM ${orm}.`);
         const manifest = target;
-        if (!Array.isArray(manifest.fields) || typeof manifest.route !== 'string')
+        if (!Array.isArray(manifest.fields) || typeof manifest.route !== 'string' || typeof manifest.table !== 'string')
             throw new Error(`Le manifeste de la ressource cible ${relation.target} est incomplet.`);
         return {
             ...relation,
@@ -70,6 +76,7 @@ function resolveRelations(projectRoot, name, orm, fields, relations) {
             targetClassName: pascal(relation.target),
             targetFields: manifest.fields,
             targetRoute: manifest.route,
+            targetTable: manifest.table,
         };
     });
     if (new Set(resolved.map((relation) => relationField(relation))).size !== resolved.length)
@@ -79,7 +86,9 @@ function resolveRelations(projectRoot, name, orm, fields, relations) {
     return resolved;
 }
 function relationFields(relations) {
-    return relations.map((relation) => ({
+    return relations
+        .filter((relation) => relation.type === 'belongsTo')
+        .map((relation) => ({
         name: relationIdField(relation),
         type: 'uuid',
         nullable: relation.nullable,
@@ -111,6 +120,10 @@ function stableSuffix(value) {
 }
 function indexName(table, fields) {
     const value = `idx_${table}_${fields.join('_')}`;
+    return value.length <= 63 ? value : `${value.slice(0, 54)}_${stableSuffix(value)}`;
+}
+function uniqueIndexName(table, fields) {
+    const value = `uq_${table}_${fields.join('_')}`;
     return value.length <= 63 ? value : `${value.slice(0, 54)}_${stableSuffix(value)}`;
 }
 function resolvedIndexes(fields, indexes) {
@@ -498,11 +511,15 @@ function prismaSchema(source, className, table, fields, indexes, relations) {
         return `enum ${name} {\n${field.enumValues.map((value) => `  ${value}`).join('\n')}\n}`;
     });
     const indexDefinitions = indexes
-        .map((index) => `  @@index([${index.fields.join(', ')}], map: "${indexName(table, index.fields)}")`)
+        .map((index) => index.unique
+        ? `  @@unique([${index.fields.join(', ')}], map: "${uniqueIndexName(table, index.fields)}")`
+        : `  @@index([${index.fields.join(', ')}], map: "${indexName(table, index.fields)}")`)
         .join('\n');
     const withInverses = addPrismaInverseRelations(source, className, relations);
     const relationProperties = relations
-        .map((relation) => `  ${relation.field} ${relation.targetClassName}${relation.nullable ? '?' : ''} @relation("${relationName(relation, className)}", fields: [${relationIdField(relation)}], references: [id], onDelete: ${relation.onDelete === 'SET NULL' ? 'SetNull' : 'Restrict'})`)
+        .map((relation) => relation.type === 'manyToMany'
+        ? `  ${relation.field} ${relation.targetClassName}[] @relation("${relationName(relation, className)}")`
+        : `  ${relation.field} ${relation.targetClassName}${relation.nullable ? '?' : ''} @relation("${relationName(relation, className)}", fields: [${relationIdField(relation)}], references: [id], onDelete: ${relation.onDelete === 'SET NULL' ? 'SetNull' : 'Restrict'})`)
         .join('\n');
     return `${withInverses.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${relationProperties ? `\n${relationProperties}` : ''}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
 }
@@ -526,6 +543,87 @@ function prismaRuntime(projectRoot) {
         },
     ];
 }
+function manyToManyRelations(relations) {
+    return relations.filter((relation) => relation.type === 'manyToMany');
+}
+function relationMethodName(prefix, relation) {
+    return `${prefix}${pascal(relation.field)}`;
+}
+function relationControllerMethods(relations, target) {
+    return manyToManyRelations(relations)
+        .map((relation) => `
+
+    @Post(':id/${relation.field}/:targetId')
+    @HttpCode(204)
+    async ${relationMethodName('attach', relation)}(
+        @Param('id', new ParseUUIDPipe()) id: string,
+        @Param('targetId', new ParseUUIDPipe()) targetId: string,
+    ): Promise<void> {
+        await this.${target}.${relationMethodName('attach', relation)}(id, targetId);
+    }
+
+    @Delete(':id/${relation.field}/:targetId')
+    @HttpCode(204)
+    async ${relationMethodName('detach', relation)}(
+        @Param('id', new ParseUUIDPipe()) id: string,
+        @Param('targetId', new ParseUUIDPipe()) targetId: string,
+    ): Promise<void> {
+        await this.${target}.${relationMethodName('detach', relation)}(id, targetId);
+    }`)
+        .join('');
+}
+function typeOrmRelationMethods(className, relations) {
+    return manyToManyRelations(relations)
+        .map((relation) => `
+
+    async ${relationMethodName('attach', relation)}(id: string, targetId: string): Promise<void> {
+        await this.findOne(id);
+        try {
+            await this.repository
+                .createQueryBuilder()
+                .relation(${className}Entity, '${relation.field}')
+                .of(id)
+                .add(targetId);
+        } catch (error) {
+            this.rethrowPersistenceError(error);
+        }
+    }
+
+    async ${relationMethodName('detach', relation)}(id: string, targetId: string): Promise<void> {
+        await this.findOne(id);
+        try {
+            await this.repository
+                .createQueryBuilder()
+                .relation(${className}Entity, '${relation.field}')
+                .of(id)
+                .remove(targetId);
+        } catch (error) {
+            this.rethrowPersistenceError(error);
+        }
+    }`)
+        .join('');
+}
+function prismaRelationMethods(relations) {
+    return manyToManyRelations(relations)
+        .map((relation) => `
+
+    async ${relationMethodName('attach', relation)}(id: string, targetId: string): Promise<void> {
+        try {
+            await this.model.update({ where: { id }, data: { ${relation.field}: { connect: { id: targetId } } } } as never);
+        } catch (error) {
+            this.handle(error);
+        }
+    }
+
+    async ${relationMethodName('detach', relation)}(id: string, targetId: string): Promise<void> {
+        try {
+            await this.model.update({ where: { id }, data: { ${relation.field}: { disconnect: { id: targetId } } } } as never);
+        } catch (error) {
+            this.handle(error);
+        }
+    }`)
+        .join('');
+}
 function addTypeOrmInverseRelations(projectRoot, name, className, relations) {
     const byTarget = new Map();
     for (const relation of relations) {
@@ -536,12 +634,20 @@ function addTypeOrmInverseRelations(projectRoot, name, className, relations) {
     return [...byTarget.entries()].map(([target, targetRelations]) => {
         const relative = `src/app/${target}/persistence/${target}.entity.ts`;
         const source = fs.readFileSync(projectPath(projectRoot, relative), 'utf8');
-        const decoratorImport = /import \{ ([^}]+) \} from 'typeorm';/;
+        const decoratorImport = /import\s*\{\s*([\s\S]*?)\s*\}\s*from 'typeorm';/;
         const importMatch = decoratorImport.exec(source);
         if (!importMatch)
             throw new Error(`L'entité cible ${targetRelations[0].targetClassName}Entity utilise un import TypeORM non supporté.`);
-        const decorators = new Set(importMatch[1].split(',').map((item) => item.trim()));
-        decorators.add('OneToMany');
+        const decorators = new Set(importMatch[1]
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean));
+        if (targetRelations.some((relation) => relation.type === 'belongsTo'))
+            decorators.add('OneToMany');
+        if (targetRelations.some((relation) => relation.type === 'manyToMany')) {
+            decorators.add('ManyToMany');
+            decorators.add('type Relation');
+        }
         const decoratorNames = [...decorators].sort();
         const decoratorStatement = `import { ${decoratorNames.join(', ')} } from 'typeorm';`;
         const decoratorReplacement = decoratorStatement.length <= 80
@@ -557,7 +663,9 @@ function addTypeOrmInverseRelations(projectRoot, name, className, relations) {
             .map((relation) => {
             if (new RegExp(`\\b${relation.inverse}\\b`).test(source))
                 throw new Error(`La propriété ${relation.inverse} existe déjà sur ${relation.targetClassName}Entity.`);
-            return `${indentation}@OneToMany(() => ${className}Entity, (${camel(name)}) => ${camel(name)}.${relation.field})\n${indentation}${relation.inverse}!: ${className}Entity[];`;
+            return relation.type === 'manyToMany'
+                ? `${indentation}@ManyToMany(() => ${className}Entity, (${camel(name)}) => ${camel(name)}.${relation.field})\n${indentation}${relation.inverse}!: Relation<${className}Entity>[];`
+                : `${indentation}@OneToMany(() => ${className}Entity, (${camel(name)}) => ${camel(name)}.${relation.field})\n${indentation}${relation.inverse}!: ${className}Entity[];`;
         })
             .join('\n\n')}`;
         const end = withImport.lastIndexOf('\n}');
@@ -570,7 +678,7 @@ function addTypeOrmInverseRelations(projectRoot, name, className, relations) {
         };
     });
 }
-function prismaResourceFiles(name, className, fields, route) {
+function prismaResourceFiles(name, className, fields, route, relations) {
     const files = new Map();
     const properties = fields
         .map((field) => `    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
@@ -586,8 +694,8 @@ function prismaResourceFiles(name, className, fields, route) {
     files.set(`dto/create-${name}.dto.ts`, `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`);
     files.set(`dto/update-${name}.dto.ts`, `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`);
     files.set(`dto/list-${name}.query.ts`, `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport class List${className}Query {\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;\n}\n`);
-    files.set(`persistence/${name}.repository.ts`, `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') throw new ConflictException('Cette ressource est référencée par une autre ressource.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`);
-    files.set(`${name}.controller.ts`, `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }\n}\n`);
+    files.set(`persistence/${name}.repository.ts`, `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }${prismaRelationMethods(relations)}\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') throw new ConflictException('Cette ressource est référencée par une autre ressource.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`);
+    files.set(`${name}.controller.ts`, `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }${relationControllerMethods(relations, 'repository')}\n}\n`);
     files.set(`${name}.module.ts`, `import { Module } from '@nestjs/common';\nimport { PrismaModule } from '../../prisma/prisma.module.js';\nimport { ${className}Controller } from './${name}.controller.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({ imports: [PrismaModule], controllers: [${className}Controller], providers: [${className}Repository] })\nexport class ${className}Module {}\n`);
     const repositoryPath = `persistence/${name}.repository.ts`;
     files.set(repositoryPath, files
@@ -605,14 +713,18 @@ function prismaResourceFiles(name, className, fields, route) {
 function featureFiles(name, className, fields, route, table, profile, swagger, indexes, relations) {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
+    const belongsToRelations = relations.filter((relation) => relation.type === 'belongsTo');
+    const manyRelations = manyToManyRelations(relations);
     const relationImports = relations
         .map((relation) => `import { ${relation.targetClassName}Entity } from '../../${relation.target}/persistence/${relation.target}.entity.js';`)
         .join('\n');
     const relationProperties = relations
-        .map((relation) => `    @ManyToOne(() => ${relation.targetClassName}Entity, (${relation.field}) => ${relation.field}.${relation.inverse}, { nullable: ${relation.nullable}, onDelete: '${relation.onDelete}' })\n    @JoinColumn({ name: '${relationIdField(relation)}' })\n    ${relation.field}${relation.nullable ? '?' : '!'}: Relation<${relation.targetClassName}Entity>${relation.nullable ? ' | null' : ''};`)
+        .map((relation) => relation.type === 'manyToMany'
+        ? `    @ManyToMany(() => ${relation.targetClassName}Entity, (${camel(relation.target)}) => ${camel(relation.target)}.${relation.inverse})\n    @JoinTable({ name: '${joinTableName(table, relation)}', joinColumn: { name: '${camel(name)}Id', referencedColumnName: 'id' }, inverseJoinColumn: { name: '${camel(relation.target)}Id', referencedColumnName: 'id' } })\n    ${relation.field}!: Relation<${relation.targetClassName}Entity>[];`
+        : `    @ManyToOne(() => ${relation.targetClassName}Entity, (${relation.field}) => ${relation.field}.${relation.inverse}, { nullable: ${relation.nullable}, onDelete: '${relation.onDelete}' })\n    @JoinColumn({ name: '${relationIdField(relation)}' })\n    ${relation.field}${relation.nullable ? '?' : '!'}: Relation<${relation.targetClassName}Entity>${relation.nullable ? ' | null' : ''};`)
         .join('\n\n');
     const entityIndexes = indexes
-        .map((index) => `@Index('${indexName(table, index.fields)}', [${index.fields.map((field) => `'${field}'`).join(', ')}])`)
+        .map((index) => `@Index('${index.unique ? uniqueIndexName(table, index.fields) : indexName(table, index.fields)}', [${index.fields.map((field) => `'${field}'`).join(', ')}]${index.unique ? ', { unique: true }' : ''})`)
         .join('\n');
     const fieldAssignments = propertyMap(fields);
     const domainProperties = fields
@@ -623,7 +735,7 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
     files.set('dto/create-' + name + '.dto.ts', `import { ${validationImports(fields, false)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, false)} } from '@nestjs/swagger';\n` : ''}\nexport class Create${className}Dto {\n${dtoFields(fields, false, swagger)}\n}\n`);
     files.set('dto/update-' + name + '.dto.ts', `import { ${validationImports(fields, true)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, true)} } from '@nestjs/swagger';\n` : ''}\nexport class Update${className}Dto {\n${dtoFields(fields, true, swagger)}\n}\n`);
     files.set('dto/list-' + name + '.query.ts', `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport const MAX_PAGE_SIZE = 100;\n\nexport class List${className}Query {\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;\n\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;\n}\n`);
-    files.set('persistence/' + name + '.entity.ts', `import { Column, Entity${indexes.length ? ', Index' : ''}${relations.length ? ', JoinColumn, ManyToOne, type Relation' : ''}, PrimaryGeneratedColumn } from 'typeorm';\n${relationImports ? `${relationImports}\n` : ''}\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}${relationProperties ? `\n\n${relationProperties}` : ''}\n}\n`);
+    files.set('persistence/' + name + '.entity.ts', `import { Column, Entity${indexes.length ? ', Index' : ''}${belongsToRelations.length ? ', JoinColumn, ManyToOne' : ''}${manyRelations.length ? ', JoinTable, ManyToMany' : ''}${relations.length ? ', type Relation' : ''}, PrimaryGeneratedColumn } from 'typeorm';\n${relationImports ? `${relationImports}\n` : ''}\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}${relationProperties ? `\n\n${relationProperties}` : ''}\n}\n`);
     if (swagger) {
         const queryPath = 'dto/list-' + name + '.query.ts';
         const query = files.get(queryPath);
@@ -647,12 +759,38 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
         ? `new ${className}ConflictError('Cette ressource est référencée par une autre ressource.')`
         : `new ConflictException('Cette ressource est référencée par une autre ressource.')`;
     files.set('persistence/' + name + '.repository.ts', `${persistenceImports}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: ${persistenceInputTypes}): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw ${missingError};\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: ${persistenceUpdateTypes}): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw ${missingError};\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        try {\n            const result = await this.repository.delete(id);\n            if (!result.affected) throw ${missingError};\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw ${conflictError};\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23503')\n            throw ${foreignKeyConflictError};\n        throw error;\n    }\n}\n`);
+    if (manyRelations.length) {
+        const persistencePath = 'persistence/' + name + '.repository.ts';
+        files.set(persistencePath, files
+            .get(persistencePath)
+            .replace('    private toDomain', `${typeOrmRelationMethods(className, relations)}\n\n    private toDomain`));
+    }
     if (advanced) {
         const contract = applicationContract(name, className, fields);
         files.set(contract.path, contract.content);
         files.set(`application/${name}.errors.ts`, `export class ${className}NotFoundError extends Error {\n    constructor(message = '${className} introuvable') {\n        super(message);\n        this.name = '${className}NotFoundError';\n    }\n}\n\nexport class ${className}ConflictError extends Error {\n    constructor(message = 'Une ressource avec cette valeur unique existe déjà.') {\n        super(message);\n        this.name = '${className}ConflictError';\n    }\n}\n`);
         files.set(`application/ports/${name}.repository.port.ts`, `import { Create${className}Input, Update${className}Input } from '../${name}.contract.js';\nimport { ${className} } from '../../domain/${name}.js';\n\nexport const ${className}RepositoryToken = Symbol('${className}RepositoryPort');\n\nexport interface ${className}RepositoryPort {\n    create(input: Create${className}Input): Promise<${className}>;\n    findOne(id: string): Promise<${className}>;\n    findMany(skip: number, take: number): Promise<${className}[]>;\n    update(id: string, input: Update${className}Input): Promise<${className}>;\n    remove(id: string): Promise<void>;\n}\n`);
         files.set(`application/${name}.service.ts`, `import { Create${className}Input, ${className}Output, Update${className}Input } from './${name}.contract.js';\nimport { ${className}RepositoryPort } from './ports/${name}.repository.port.js';\nimport { ${className} } from '../domain/${name}.js';\n\nexport class ${className}Service {\n    constructor(private readonly repository: ${className}RepositoryPort) {}\n\n    async create(input: Create${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.create(input));\n    }\n\n    async findOne(id: string): Promise<${className}Output> {\n        return this.toOutput(await this.repository.findOne(id));\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}Output[]> {\n        return (await this.repository.findMany(skip, take)).map((value) => this.toOutput(value));\n    }\n\n    async update(id: string, input: Update${className}Input): Promise<${className}Output> {\n        return this.toOutput(await this.repository.update(id, input));\n    }\n\n    remove(id: string): Promise<void> {\n        return this.repository.remove(id);\n    }\n\n    private toOutput(value: ${className}): ${className}Output {\n        return { id: value.id, ${fields.map((field) => `${field.name}: value.${field.name}`).join(', ')} };\n    }\n}\n`);
+        if (manyRelations.length) {
+            const portPath = `application/ports/${name}.repository.port.ts`;
+            const servicePath = `application/${name}.service.ts`;
+            const portMethods = manyRelations
+                .flatMap((relation) => [
+                `    ${relationMethodName('attach', relation)}(id: string, targetId: string): Promise<void>;`,
+                `    ${relationMethodName('detach', relation)}(id: string, targetId: string): Promise<void>;`,
+            ])
+                .join('\n');
+            const serviceMethods = manyRelations
+                .flatMap((relation) => [
+                `    ${relationMethodName('attach', relation)}(id: string, targetId: string): Promise<void> { return this.repository.${relationMethodName('attach', relation)}(id, targetId); }`,
+                `    ${relationMethodName('detach', relation)}(id: string, targetId: string): Promise<void> { return this.repository.${relationMethodName('detach', relation)}(id, targetId); }`,
+            ])
+                .join('\n\n');
+            files.set(portPath, files
+                .get(portPath)
+                .replace('    remove(id: string): Promise<void>;', `    remove(id: string): Promise<void>;\n${portMethods}`));
+            files.set(servicePath, files.get(servicePath).replace('    private toOutput', `${serviceMethods}\n\n    private toOutput`));
+        }
     }
     let controllerImports = advanced
         ? `import { Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ${className}ConflictError, ${className}NotFoundError } from './application/${name}.errors.js';\nimport { ${className}Service } from './application/${name}.service.js';\n`
@@ -665,6 +803,14 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
         ? `\n    private async respond<T>(operation: Promise<T>): Promise<T> {\n        try {\n            return await operation;\n        } catch (error) {\n            if (error instanceof ${className}NotFoundError) throw new NotFoundException(error.message);\n            if (error instanceof ${className}ConflictError) throw new ConflictException(error.message);\n            throw error;\n        }\n    }\n`
         : '';
     files.set(name + '.controller.ts', `${controllerImports}import { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly ${controllerTarget}: ${controllerType}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.create(${createArgument})${advanced ? ')' : ''}; }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findMany(skip, query.limit)${advanced ? ')' : ''} };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findOne(id)${advanced ? ')' : ''}; }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.update(id, ${updateArgument})${advanced ? ')' : ''}; }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.remove(id)${advanced ? ')' : ''}; }${errorBoundary}}\n`);
+    if (manyRelations.length) {
+        const controllerPath = name + '.controller.ts';
+        const controller = files.get(controllerPath);
+        const insertion = advanced ? controller.indexOf(errorBoundary) : controller.lastIndexOf('}');
+        if (insertion === -1)
+            throw new Error(`Contrôleur généré invalide pour ${className}.`);
+        files.set(controllerPath, `${controller.slice(0, insertion)}${relationControllerMethods(relations, controllerTarget)}${controller.slice(insertion)}`);
+    }
     if (swagger) {
         const controllerPath = name + '.controller.ts';
         const controller = files.get(controllerPath);
@@ -704,7 +850,7 @@ export async function generateResource(projectRoot, options) {
     const fields = [...options.fields, ...relationFields(relations)];
     const indexes = resolvedIndexes(fields, options.indexes);
     if (orm === 'prisma') {
-        const files = prismaResourceFiles(name, className, fields, options.route);
+        const files = prismaResourceFiles(name, className, fields, options.route, relations);
         const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
         const schemaPath = projectPath(projectRoot, 'prisma/schema.prisma');
         const changes = [...files].map(([relative, content]) => ({
