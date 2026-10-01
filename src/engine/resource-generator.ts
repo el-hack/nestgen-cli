@@ -778,11 +778,36 @@ function relationMethodName(prefix: 'attach' | 'detach', relation: ResolvedRelat
     return `${prefix}${pascal(relation.field)}`;
 }
 
+function authorizationContract(name: string): string {
+    return `import { SetMetadata } from '@nestjs/common';
+
+export const ResourcePolicyMetadata = 'nestgen:resource-policy';
+export const resourceActions = ['create', 'list', 'read', 'update', 'delete'] as const;
+export type ResourceActionName = (typeof resourceActions)[number];
+export type ResourcePolicyRequirement = { resource: '${name}'; action: ResourceActionName };
+export type OwnershipSubject = { ownerId?: string | null };
+
+/** A small policy primitive for guards that implement owner-only access. */
+export function isResourceOwner(actorId: string | undefined, subject: OwnershipSubject): boolean {
+    return typeof actorId === 'string' && actorId.length > 0 && actorId === subject.ownerId;
+}
+
+/**
+ * Metadata for an application-provided guard. NestGen does not authenticate a
+ * request or register a guard: connect this contract to the existing identity
+ * and policy layer of the generated application.
+ */
+export const ResourceAction = (action: ResourceActionName) =>
+    SetMetadata(ResourcePolicyMetadata, { resource: '${name}', action } satisfies ResourcePolicyRequirement);
+`;
+}
+
 function relationControllerMethods(relations: ResolvedRelation[], target: 'repository' | 'service'): string {
     return manyToManyRelations(relations)
         .map(
             (relation) => `
 
+    @ResourceAction('update')
     @Post(':id/${relation.field}/:targetId')
     @HttpCode(204)
     async ${relationMethodName('attach', relation)}(
@@ -792,6 +817,7 @@ function relationControllerMethods(relations: ResolvedRelation[], target: 'repos
         await this.${target}.${relationMethodName('attach', relation)}(id, targetId);
     }
 
+    @ResourceAction('update')
     @Delete(':id/${relation.field}/:targetId')
     @HttpCode(204)
     async ${relationMethodName('detach', relation)}(
@@ -971,8 +997,9 @@ function prismaResourceFiles(
     );
     files.set(
         `${name}.controller.ts`,
-        `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }${relationControllerMethods(relations, 'repository')}\n}\n`,
+        `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { ResourceAction } from './authorization/resource-policy.js';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @ResourceAction('create')\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @ResourceAction('list')\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @ResourceAction('read')\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @ResourceAction('update')\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @ResourceAction('delete')\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }${relationControllerMethods(relations, 'repository')}\n}\n`,
     );
+    files.set('authorization/resource-policy.ts', authorizationContract(name));
     files.set(
         `${name}.module.ts`,
         `import { Module } from '@nestjs/common';\nimport { PrismaModule } from '../../prisma/prisma.module.js';\nimport { ${className}Controller } from './${name}.controller.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({ imports: [PrismaModule], controllers: [${className}Controller], providers: [${className}Repository] })\nexport class ${className}Module {}\n`,
@@ -1282,8 +1309,9 @@ function featureFiles(
         : '';
     files.set(
         name + '.controller.ts',
-        `${controllerImports}import { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly ${controllerTarget}: ${controllerType}) {}\n\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.create(${createArgument})${advanced ? ')' : ''}; }\n\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findMany(skip, query.limit)${advanced ? ')' : ''} };\n    }\n\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findOne(id)${advanced ? ')' : ''}; }\n\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.update(id, ${updateArgument})${advanced ? ')' : ''}; }\n\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.remove(id)${advanced ? ')' : ''}; }${errorBoundary}}\n`,
+        `${controllerImports}import { ResourceAction } from './authorization/resource-policy.js';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly ${controllerTarget}: ${controllerType}) {}\n\n    @ResourceAction('create')\n    @Post()\n    create(@Body() dto: Create${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.create(${createArgument})${advanced ? ')' : ''}; }\n\n    @ResourceAction('list')\n    @Get()\n    async list(@Query() query: List${className}Query) {\n        const skip = (query.page - 1) * query.limit;\n        return { page: query.page, limit: query.limit, data: await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findMany(skip, query.limit)${advanced ? ')' : ''} };\n    }\n\n    @ResourceAction('read')\n    @Get(':id')\n    get(@Param('id', new ParseUUIDPipe()) id: string) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.findOne(id)${advanced ? ')' : ''}; }\n\n    @ResourceAction('update')\n    @Patch(':id')\n    update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.update(id, ${updateArgument})${advanced ? ')' : ''}; }\n\n    @ResourceAction('delete')\n    @Delete(':id')\n    @HttpCode(204)\n    async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> { await ${advanced ? 'this.respond(' : ''}this.${controllerTarget}.remove(id)${advanced ? ')' : ''}; }${errorBoundary}}\n`,
     );
+    files.set('authorization/resource-policy.ts', authorizationContract(name));
     if (hasListFeatures) {
         const controllerPath = name + '.controller.ts';
         files.set(

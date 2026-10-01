@@ -422,6 +422,38 @@ test('generates a product resource from its business fields', async () => {
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
 });
 
+test('adds framework-neutral authorization metadata to generated resource routes', async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-authorization-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    writeNestManifest(root);
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(root, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+
+    await generateResource(root, {
+        name: 'document',
+        route: 'documents',
+        table: 'documents',
+        fields: parseResourceFields(['ownerId:uuid', 'title:string']),
+    });
+
+    const resourceRoot = path.join(root, 'src', 'app', 'document');
+    const controller = fs.readFileSync(path.join(resourceRoot, 'document.controller.ts'), 'utf8');
+    const policy = fs.readFileSync(path.join(resourceRoot, 'authorization', 'resource-policy.ts'), 'utf8');
+    assert.match(controller, /@ResourceAction\('create'\)/);
+    assert.match(controller, /@ResourceAction\('list'\)/);
+    assert.match(controller, /@ResourceAction\('read'\)/);
+    assert.match(controller, /@ResourceAction\('update'\)/);
+    assert.match(controller, /@ResourceAction\('delete'\)/);
+    assert.match(policy, /ResourcePolicyMetadata/);
+    assert.match(policy, /resource: 'document'/);
+    assert.match(policy, /isResourceOwner/);
+    assert.match(policy, /actorId === subject\.ownerId/);
+    assert.doesNotMatch(policy, /passport|jwt|oauth/i);
+});
+
 test('records deterministic safe generation metadata and identifies manual changes', async (t) => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-generation-manifest-'));
     t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
