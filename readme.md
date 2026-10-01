@@ -11,7 +11,7 @@ NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources
 - Node.js `>=24.15.0 <27`, npm 11, pnpm or Yarn.
 - `init` creates a NestJS project interactively with TypeORM or Prisma.
 - `module <name>` adds the advanced module layout for TypeORM or Prisma.
-- `resource <name>` currently generates a **TypeORM** REST CRUD: entity, DTOs, repository, controller, validation, pagination, `404` and unique-constraint `409`.
+- `resource <name>` generates a TypeORM or Prisma REST CRUD: entity or model, DTOs, repository, controller, validation, pagination, `404` and unique-constraint `409`.
 - `doctor`, `--dry-run`, `--help`, `--version`, `--no-interactive` and `--quiet` are scriptable CLI features.
 
 The repository CI validates linting, formatting, generator contracts, a Prisma integration, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, and the npm tarball. It does not publish releases or deploy applications.
@@ -132,6 +132,29 @@ NestGen refuse les combinaisons incompatibles, les bornes inversées et les inde
 ```
 
 Le fichier doit être situé dans le projet courant. Les diagnostics indiquent le fichier et le champ ou l’index concerné, et `--dry-run` produit le même plan que la définition équivalente en flags.
+
+### Filtres, recherche et tri contrôlés
+
+Ajoutez `list` à la définition pour autoriser explicitement les filtres et tris exposés par l’endpoint de liste. Les champs ou opérateurs absents de cette liste sont refusés avec `400`. Les paramètres de filtre sont convertis selon le type déclaré (`number`, `integer`, `boolean` et `date`) et les requêtes ORM restent paramétrées.
+
+```json
+{
+    "version": 1,
+    "name": "product",
+    "fields": ["sku:string!", "price:number", "published:boolean"],
+    "list": {
+        "filters": {
+            "sku": ["eq", "contains"],
+            "price": ["gte", "lt"],
+            "published": ["eq"]
+        },
+        "search": ["sku"],
+        "sort": ["sku", "price"]
+    }
+}
+```
+
+Les opérateurs autorisés dépendent du type : `eq` et `neq` pour tous les champs, `contains` pour les chaînes, et `gt`, `gte`, `lt`, `lte` pour les nombres, entiers, décimaux et dates. Une requête telle que `GET /products?skuContains=pro&priceGte=10&sort=price:desc` combine les filtres, applique un ordre déterministe (avec `id` comme brise-égalité) et respecte `page` et `limit`. `q` recherche sur les champs déclarés dans `search`.
 
 ## Relations entre ressources
 

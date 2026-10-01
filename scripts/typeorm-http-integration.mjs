@@ -168,6 +168,11 @@ try {
         ]),
         indexes: [{ fields: ['sku', 'status'] }],
         profile: 'simple',
+        list: {
+            filters: { sku: ['eq', 'contains'], price: ['gte', 'lt'] },
+            search: ['sku'],
+            sort: ['sku', 'price'],
+        },
     });
     await generateResource(root, {
         name: 'customer',

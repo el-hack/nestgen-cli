@@ -202,6 +202,63 @@ export function parseResourceRelations(values) {
         };
     });
 }
+const filterOperatorsByType = {
+    string: new Set(['eq', 'neq', 'contains']),
+    number: new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    integer: new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    decimal: new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    boolean: new Set(['eq', 'neq']),
+    date: new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    uuid: new Set(['eq', 'neq']),
+    enum: new Set(['eq', 'neq']),
+};
+export function parseResourceListOptions(value, fields) {
+    if (value === undefined)
+        return { filters: {}, sort: [], search: [] };
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error('list doit être un objet.');
+    const list = value;
+    if (Object.keys(list).some((key) => !['filters', 'sort', 'search'].includes(key)))
+        throw new Error('list contient une propriété inconnue.');
+    const knownFields = new Map(fields.map((field) => [field.name, field]));
+    const filtersRaw = list.filters ?? {};
+    if (!filtersRaw || typeof filtersRaw !== 'object' || Array.isArray(filtersRaw))
+        throw new Error('list.filters doit être un objet.');
+    const filters = {};
+    for (const [name, operators] of Object.entries(filtersRaw)) {
+        const field = knownFields.get(name);
+        if (!field)
+            throw new Error(`list.filters.${name} cible un champ inconnu.`);
+        if (!Array.isArray(operators) ||
+            operators.length === 0 ||
+            operators.some((operator) => typeof operator !== 'string'))
+            throw new Error(`list.filters.${name} doit contenir au moins un opérateur.`);
+        const normalized = operators;
+        if (new Set(normalized).size !== normalized.length)
+            throw new Error(`list.filters.${name} contient un opérateur répété.`);
+        if (normalized.some((operator) => !filterOperatorsByType[field.type].has(operator)))
+            throw new Error(`list.filters.${name} contient un opérateur incompatible avec ${field.type}.`);
+        filters[name] = normalized;
+    }
+    const parseFieldList = (key, allowed) => {
+        const values = list[key] ?? [];
+        if (!Array.isArray(values) || values.some((entry) => typeof entry !== 'string'))
+            throw new Error(`list.${key} doit être un tableau de noms de champs.`);
+        if (new Set(values).size !== values.length)
+            throw new Error(`list.${key} contient un champ répété.`);
+        for (const name of values) {
+            const field = knownFields.get(name);
+            if (!field || !allowed(field))
+                throw new Error(`list.${key}.${name} n'est pas autorisé.`);
+        }
+        return values;
+    };
+    return {
+        filters,
+        sort: parseFieldList('sort', () => true),
+        search: parseFieldList('search', (field) => field.type === 'string'),
+    };
+}
 export function typescriptType(field) {
     return field.type === 'number' || field.type === 'integer'
         ? 'number'

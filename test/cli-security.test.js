@@ -19,6 +19,7 @@ import { generateModule } from '../dist/engine/module-generator.js';
 import {
     parseResourceFields,
     parseResourceIndexes,
+    parseResourceListOptions,
     parseResourceRelations,
     prismaType,
     typescriptType,
@@ -297,6 +298,62 @@ test('generates many-to-many join tables and association endpoints for TypeORM a
         () => parseResourceRelations([{ type: 'manyToMany', target: 'role', nullable: false }]),
         /manyToMany ne définit ni nullable ni onDelete/,
     );
+});
+
+test('generates controlled filters, search and stable sorting for each ORM', async () => {
+    const fields = parseResourceFields(['title:string!', 'price:number', 'published:boolean']);
+    const list = parseResourceListOptions(
+        {
+            filters: { title: ['eq', 'contains'], price: ['gte', 'lt'], published: ['eq'] },
+            search: ['title'],
+            sort: ['title', 'price'],
+        },
+        fields,
+    );
+    assert.throws(() => parseResourceListOptions({ filters: { missing: ['eq'] } }, fields), /champ inconnu/);
+    assert.throws(() => parseResourceListOptions({ filters: { title: ['gt'] } }, fields), /incompatible/);
+    assert.throws(() => parseResourceListOptions({ unsupported: true }, fields), /propriété inconnue/);
+    for (const orm of ['typeorm', 'prisma']) {
+        const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), `nestgen-${orm}-list-`));
+        writeNestManifest(fixturePath);
+        fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+        fs.writeFileSync(
+            path.join(fixturePath, 'src', 'app.module.ts'),
+            "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+        );
+        if (orm === 'prisma') {
+            fs.mkdirSync(path.join(fixturePath, 'prisma'));
+            fs.writeFileSync(
+                path.join(fixturePath, 'prisma', 'schema.prisma'),
+                'generator client {\n  provider = "prisma-client-js"\n}\n\ndatasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}\n',
+            );
+        }
+        await generateResource(fixturePath, {
+            name: 'product',
+            route: 'products',
+            table: 'products',
+            orm,
+            fields,
+            list,
+        });
+        const root = path.join(fixturePath, 'src/app/product');
+        const query = fs.readFileSync(path.join(root, 'dto/list-product.query.ts'), 'utf8');
+        const repository = fs.readFileSync(path.join(root, 'persistence/product.repository.ts'), 'utf8');
+        const controller = fs.readFileSync(path.join(root, 'product.controller.ts'), 'utf8');
+        assert.match(query, /titleContains\?: string/);
+        assert.match(query, /@Type\(\(\) => Number\)[\s\S]*?@IsNumber\(\)[\s\S]*?priceGte\?: number/);
+        assert.match(query, /sort\?: string/);
+        assert.match(controller, /findMany\([\s\S]*?query,?\s*\)/);
+        assert.match(repository, /Tri invalide/);
+        assert.match(repository, /id: 'asc'|addOrderBy\('product.id', 'ASC'\)/);
+        if (orm === 'typeorm') {
+            assert.match(repository, /createQueryBuilder\('product'\)/);
+            assert.match(repository, /ILIKE :titleContains/);
+        } else {
+            assert.match(repository, /contains: query.titleContains/);
+            assert.match(repository, /where: Record<string, unknown>/);
+        }
+    }
 });
 
 test('generates a product resource from its business fields', async () => {
