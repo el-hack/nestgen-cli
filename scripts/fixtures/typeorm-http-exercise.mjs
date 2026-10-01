@@ -195,6 +195,15 @@ try {
     const listed = await api.get('/catalog/products?page=1&limit=1').expect(200);
     if (listed.body.data.length !== 1 || listed.body.limit !== 1)
         throw new Error('La pagination ne renvoie pas le contrat attendu.');
+    await api
+        .post('/simple-products')
+        .send({ sku: 'filter-check', price: 12, amount: '1.00', status: 'DRAFT', published: false })
+        .expect(201);
+    const filtered = await api.get('/simple-products?skuContains=filter&priceGte=10&sort=price:desc').expect(200);
+    assert.equal(filtered.body.data[0].sku, 'filter-check');
+    await api.get('/simple-products?unknown=value').expect(400);
+    await api.get('/simple-products?sort=price:sideways').expect(400);
+    await api.get('/simple-products?sort=price:desc:extra').expect(400);
     step = 'mise à jour';
     await api
         .patch('/catalog/products/' + created.body.id)
