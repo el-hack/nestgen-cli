@@ -20,8 +20,11 @@ export function loadConfig(projectRoot) {
         throw new Error('Version de configuration ou de templates non supportée.');
     if (config.orm !== 'typeorm' && config.orm !== 'prisma')
         throw new Error('ORM de configuration invalide.');
-    if (config.sourceRoot !== 'src')
-        throw new Error('Seul sourceRoot "src" est supporté.');
+    if (typeof config.sourceRoot !== 'string' ||
+        !config.sourceRoot ||
+        path.isAbsolute(config.sourceRoot) ||
+        config.sourceRoot.split(/[\\/]/).includes('..'))
+        throw new Error('sourceRoot de configuration invalide.');
     const packageManager = config.packageManager;
     if (!packageManager || !['npm', 'pnpm', 'yarn'].includes(packageManager))
         throw new Error('Package manager invalide.');

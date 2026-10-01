@@ -463,6 +463,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             swagger: undefined,
             git: undefined,
             modules: undefined,
+            application: undefined,
             indexes: undefined,
             definitionFile: undefined,
             noInteractive: true,
@@ -493,6 +494,8 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
     assert.equal(init.options.modules, 'user,product');
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
     assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
+    assert.throws(() => parseCliArgs(['module', 'order', '--application']), /requiert une valeur/);
+    assert.equal(parseCliArgs(['module', 'order', '--application', 'api']).options.application, 'api');
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
 });
 
@@ -630,6 +633,66 @@ test('reports unsupported Nest project structures before generation', () => {
     );
     fs.writeFileSync(path.join(fixturePath, 'nest-cli.json'), JSON.stringify({ monorepo: true }));
     assert.throws(() => inspectProject(fixturePath, 'typeorm'), /workspaces Nest/);
+});
+
+test('targets configured source roots and selected Nest workspace applications', async (t) => {
+    const customRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-custom-source-root-'));
+    t.after(() => fs.rmSync(customRoot, { recursive: true, force: true }));
+    writeNestManifest(customRoot);
+    fs.mkdirSync(path.join(customRoot, 'custom'), { recursive: true });
+    fs.writeFileSync(
+        path.join(customRoot, 'custom', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+    fs.writeFileSync(path.join(customRoot, 'nest-cli.json'), JSON.stringify({ sourceRoot: 'custom' }));
+
+    const customProject = inspectProject(customRoot, 'typeorm');
+    assert.equal(customProject.sourceRoot, 'custom');
+    await generateResource(customRoot, {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        fields: parseResourceFields(['sku:string!']),
+    });
+    assert.equal(fs.existsSync(path.join(customRoot, 'custom', 'app', 'product', 'product.module.ts')), true);
+    assert.equal(fs.existsSync(path.join(customRoot, 'src', 'app', 'product')), false);
+    assert.match(
+        fs.readFileSync(path.join(customRoot, 'test', 'product.e2e-spec.ts'), 'utf8'),
+        /import\('\.\.\/custom\/app\.module\.js'\)/,
+    );
+
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-workspace-'));
+    t.after(() => fs.rmSync(workspaceRoot, { recursive: true, force: true }));
+    writeNestManifest(workspaceRoot);
+    for (const application of ['api', 'admin']) {
+        const sourceRoot = path.join(workspaceRoot, 'apps', application, 'src');
+        fs.mkdirSync(sourceRoot, { recursive: true });
+        fs.writeFileSync(
+            path.join(sourceRoot, 'app.module.ts'),
+            "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+        );
+    }
+    fs.writeFileSync(
+        path.join(workspaceRoot, 'nest-cli.json'),
+        JSON.stringify({
+            monorepo: true,
+            projects: {
+                api: { type: 'application', root: 'apps/api', sourceRoot: 'apps/api/src' },
+                admin: { type: 'application', root: 'apps/admin', sourceRoot: 'apps/admin/src' },
+            },
+        }),
+    );
+
+    assert.throws(() => inspectProject(workspaceRoot, 'typeorm'), /workspace ambigu/);
+    assert.throws(() => inspectProject(workspaceRoot, 'typeorm', { application: 'missing' }), /application inconnue/);
+    const apiProject = inspectProject(workspaceRoot, 'typeorm', { application: 'api' });
+    assert.equal(apiProject.sourceRoot, 'apps/api/src');
+    await generateModule(workspaceRoot, 'audit', 'typeorm', 'api');
+    assert.equal(
+        fs.existsSync(path.join(workspaceRoot, 'apps', 'api', 'src', 'app', 'audit', 'audit.module.ts')),
+        true,
+    );
+    assert.equal(fs.existsSync(path.join(workspaceRoot, 'apps', 'admin', 'src', 'app', 'audit')), false);
 });
 
 test('does not create a module directory when preflight fails', () => {

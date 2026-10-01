@@ -66,8 +66,8 @@ function updatePrismaSchema(source, resource) {
         throw new Error(`Le modèle Prisma ${resource.pascal} existe déjà.`);
     return `${source.trimEnd()}\n\nmodel ${resource.pascal} {\n  id    String @id @default(uuid())\n  name  String\n  email String @unique\n\n  @@map("${resource.table}")\n}\n`;
 }
-function prismaRuntimeChanges(projectRoot) {
-    const prismaDirectory = path.join(projectRoot, 'src', 'prisma');
+function prismaRuntimeChanges(projectRoot, sourceRoot) {
+    const prismaDirectory = path.join(projectRoot, sourceRoot, 'prisma');
     const servicePath = path.join(prismaDirectory, 'prisma.service.ts');
     const modulePath = path.join(prismaDirectory, 'prisma.module.ts');
     if (fs.existsSync(servicePath) && fs.existsSync(modulePath))
@@ -76,12 +76,12 @@ function prismaRuntimeChanges(projectRoot) {
         throw new Error('Runtime Prisma incomplet.');
     return [
         {
-            path: 'src/prisma/prisma.service.ts',
+            path: `${sourceRoot}/prisma/prisma.service.ts`,
             operation: 'create',
             content: "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n",
         },
         {
-            path: 'src/prisma/prisma.module.ts',
+            path: `${sourceRoot}/prisma/prisma.module.ts`,
             operation: 'create',
             content: "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service.js';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
         },
@@ -107,20 +107,21 @@ function files(resource, orm) {
     }
     return result;
 }
-export async function generateModule(projectRoot, rawName, orm) {
+export async function generateModule(projectRoot, rawName, orm, application) {
     if (orm !== 'typeorm' && orm !== 'prisma')
         throw new Error(`ORM non supporté : ${orm}.`);
     const resource = describe(rawName);
-    projectRoot = inspectProject(projectRoot, orm).root;
-    availableFeatureDirectory(projectRoot, resource.name);
-    const appModule = fs.readFileSync(path.join(projectRoot, 'src/app.module.ts'), 'utf8');
+    const project = inspectProject(projectRoot, orm, { application });
+    projectRoot = project.root;
+    availableFeatureDirectory(projectRoot, resource.name, project.sourceRoot);
+    const appModule = fs.readFileSync(project.appModulePath, 'utf8');
     const changes = [...files(resource, orm)].map(([relative, content]) => ({
-        path: `src/app/${resource.name}/${relative}`,
+        path: `${project.sourceRoot}/app/${resource.name}/${relative}`,
         content,
         operation: 'create',
     }));
     changes.push({
-        path: 'src/app.module.ts',
+        path: `${project.sourceRoot}/app.module.ts`,
         operation: 'replace',
         content: updateAppModule(appModule, `${resource.pascal}Module`, `./app/${resource.name}/${resource.name}.module.js`),
     });
@@ -131,7 +132,7 @@ export async function generateModule(projectRoot, rawName, orm) {
             operation: 'replace',
             content: updatePrismaSchema(schema, resource),
         });
-        changes.push(...prismaRuntimeChanges(projectRoot));
+        changes.push(...prismaRuntimeChanges(projectRoot, project.sourceRoot));
     }
     applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
 }

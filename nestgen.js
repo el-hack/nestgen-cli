@@ -105,6 +105,7 @@ export function parseCliArgs(args) {
         swagger: undefined,
         git: undefined,
         modules: undefined,
+        application: undefined,
         indexes: undefined,
         definitionFile: undefined,
         noInteractive: false,
@@ -137,6 +138,11 @@ export function parseCliArgs(args) {
         else if (argument === '--no-git') options.git = false;
         else if (argument === '--modules') options.modules = args[++index];
         else if (argument.startsWith('--modules=')) options.modules = argument.slice(10);
+        else if (argument === '--application') {
+            const value = args[++index];
+            if (!value || value.startsWith('-')) throw new Error('--application requiert une valeur.');
+            options.application = value;
+        } else if (argument.startsWith('--application=')) options.application = argument.slice(14);
         else if (argument === '--fields') options.fields = args[++index];
         else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
         else if (argument === '--indexes') options.indexes = args[++index];
@@ -160,10 +166,10 @@ export function parseCliArgs(args) {
     return { command: positionals.shift(), positionals, options };
 }
 
-export function createModulePlan(projectRoot, moduleName, orm) {
+export function createModulePlan(projectRoot, moduleName, orm, sourceRoot = 'src') {
     const normalizedName = validateModuleName(moduleName);
     const normalizedOrm = validateOrm(orm);
-    const resourceRoot = `src/app/${normalizedName}`;
+    const resourceRoot = `${sourceRoot}/app/${normalizedName}`;
     return {
         operation: 'module',
         module: normalizedName,
@@ -179,8 +185,8 @@ export function createModulePlan(projectRoot, moduleName, orm) {
             `${resourceRoot}/${normalizedName}.module.ts`,
         ],
         mutations: [
-            'Ajoute le module dans @Module({ imports }) de src/app.module.ts.',
-            'Ajoute CqrsModule dans src/app.module.ts si nécessaire.',
+            `Ajoute le module dans @Module({ imports }) de ${sourceRoot}/app.module.ts.`,
+            `Ajoute CqrsModule dans ${sourceRoot}/app.module.ts si nécessaire.`,
             ...(normalizedOrm === 'typeorm'
                 ? ['Ajoute la configuration TypeORM racine seulement si elle est absente.']
                 : []),
@@ -364,8 +370,8 @@ async function runModuleGeneration(parsed) {
     }
 
     if (parsed.options.dryRun) {
-        inspectProject(process.cwd(), orm);
-        console.log(JSON.stringify(createModulePlan(process.cwd(), moduleName, orm), null, 2));
+        const project = inspectProject(process.cwd(), orm, { application: parsed.options.application });
+        console.log(JSON.stringify(createModulePlan(process.cwd(), moduleName, orm, project.sourceRoot), null, 2));
         return;
     }
 
@@ -375,7 +381,7 @@ async function runModuleGeneration(parsed) {
         return;
     }
 
-    await generateModule(process.cwd(), moduleName, orm);
+    await generateModule(process.cwd(), moduleName, orm, parsed.options.application);
 }
 
 export function loadResourceDefinition(file, projectRoot = process.cwd()) {
@@ -465,6 +471,7 @@ async function runResourceGeneration(parsed) {
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
+        inspectProject(process.cwd(), orm, { cqrs: false, application: parsed.options.application });
         console.log(
             JSON.stringify(
                 { operation: 'resource', name, route, table, orm, profile, fields, indexes, relations, list },
@@ -474,7 +481,18 @@ async function runResourceGeneration(parsed) {
         );
         return;
     }
-    await generateResource(process.cwd(), { name, route, table, fields, indexes, relations, list, orm, profile });
+    await generateResource(process.cwd(), {
+        name,
+        route,
+        table,
+        fields,
+        indexes,
+        relations,
+        list,
+        orm,
+        profile,
+        application: parsed.options.application,
+    });
 }
 
 function printUsage() {
@@ -488,6 +506,7 @@ function printUsage() {
   --swagger, --no-swagger       Active ou désactive Swagger pour init
   --git, --no-git               Active ou désactive Git pour init
   --modules <a,b>               Définit les modules init, séparés par des virgules
+  --application <nom>           Cible une application d’un workspace Nest
   --dry-run                    Affiche le plan sans écrire
   --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
     );

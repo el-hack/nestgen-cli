@@ -13,6 +13,7 @@ NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources
 - `module <name>` adds the advanced module layout for TypeORM or Prisma.
 - `resource <name>` generates a TypeORM or Prisma REST CRUD: entity or model, DTOs, repository, controller, validation, pagination, `404` and unique-constraint `409`.
 - `doctor`, `--dry-run`, `--help`, `--version`, `--no-interactive` and `--quiet` are scriptable CLI features.
+- Existing Nest projects are supported when `nest-cli.json` declares a custom `sourceRoot`. In a workspace with several applications, pass `--application <name>` to target one application explicitly.
 
 The repository CI validates linting, formatting, generator contracts, a Prisma integration, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, and the npm tarball. It does not publish releases or deploy applications.
 
@@ -90,8 +91,8 @@ Install `nestgen-cli`, run `nestgen init`, choose **npm**, **typeorm** and Docke
 
 ```text
 nestgen init
-nestgen module <name> [--orm typeorm|prisma] [--dry-run]
-nestgen resource <name> --fields name:type[,name:type] [--route route] [--table table] [--profile simple|advanced]
+nestgen module <name> [--orm typeorm|prisma] [--application name] [--dry-run]
+nestgen resource <name> --fields name:type[,name:type] [--route route] [--table table] [--profile simple|advanced] [--application name]
 nestgen config init [--orm typeorm|prisma] [--profile simple|advanced] [--package-manager npm|pnpm|yarn]
 nestgen config show
 nestgen doctor
@@ -218,7 +219,7 @@ Use `nestgen --help` for the complete accepted option set. Do not rely on undocu
 
 ## Project configuration and profiles
 
-`nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. `sourceRoot` is currently restricted to `src`; custom Nest source roots are rejected before mutation.
+`nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.
 
 ```bash
 nestgen config init --orm typeorm --profile advanced --package-manager npm

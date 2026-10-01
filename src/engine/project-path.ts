@@ -17,8 +17,8 @@ export function projectPath(root: string, relativePath: string): string {
     return target;
 }
 
-export function availableFeatureDirectory(root: string, name: string): string {
-    const directory = projectPath(root, `src/app/${name}`);
+export function availableFeatureDirectory(root: string, name: string, sourceRoot = 'src'): string {
+    const directory = projectPath(root, `${sourceRoot}/app/${name}`);
     if (fs.lstatSync(directory, { throwIfNoEntry: false }))
         throw new Error(`Le module ou la ressource ${name} existe déjà.`);
     return directory;

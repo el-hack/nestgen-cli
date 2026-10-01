@@ -24,6 +24,7 @@ type Options = {
     indexes?: ResourceIndex[];
     relations?: ResourceRelation[];
     list?: ResourceListOptions;
+    application?: string;
 };
 
 type ResolvedRelation = Required<ResourceRelation> & {
@@ -76,6 +77,7 @@ function joinTableName(table: string, relation: ResolvedRelation): string {
 
 function resolveRelations(
     projectRoot: string,
+    sourceRoot: string,
     name: string,
     orm: Orm,
     fields: ResourceField[],
@@ -92,7 +94,7 @@ function resolveRelations(
                 throw new Error(`Le champ ${idField} est réservé à la relation vers ${relation.target}.`);
             knownFields.add(idField);
         }
-        const resourcePath = projectPath(projectRoot, `src/app/${relation.target}/resource.json`);
+        const resourcePath = projectPath(projectRoot, `${sourceRoot}/app/${relation.target}/resource.json`);
         if (!fs.existsSync(resourcePath))
             throw new Error(`La ressource cible ${relation.target} est introuvable. Générez-la avant la relation.`);
         let target: unknown;
@@ -425,6 +427,7 @@ function generatedRestTest(
     fields: ResourceField[],
     route: string,
     relations: ResolvedRelation[],
+    sourceRoot: string,
 ): { path: string; content: string } {
     const input = testInput(fields, true);
     const firstField = fields[0];
@@ -471,7 +474,7 @@ describe('${className} REST', () => {
     const input: Record<string, unknown> = { ${input} };
 
     beforeAll(async () => {
-        const { AppModule } = await import('../src/app.module.js');
+        const { AppModule } = await import('../${sourceRoot}/app.module.js');
         const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
         app = module.createNestApplication();
         app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
@@ -607,20 +610,20 @@ function prismaSchema(
     return `${withInverses.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${relationProperties ? `\n${relationProperties}` : ''}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
 }
 
-function prismaRuntime(projectRoot: string): FileChange[] {
-    const service = projectPath(projectRoot, 'src/prisma/prisma.service.ts');
-    const module = projectPath(projectRoot, 'src/prisma/prisma.module.ts');
+function prismaRuntime(projectRoot: string, sourceRoot: string): FileChange[] {
+    const service = projectPath(projectRoot, `${sourceRoot}/prisma/prisma.service.ts`);
+    const module = projectPath(projectRoot, `${sourceRoot}/prisma/prisma.module.ts`);
     if (fs.existsSync(service) && fs.existsSync(module)) return [];
     if (fs.existsSync(service) || fs.existsSync(module)) throw new Error('Runtime Prisma incomplet.');
     return [
         {
-            path: 'src/prisma/prisma.service.ts',
+            path: `${sourceRoot}/prisma/prisma.service.ts`,
             operation: 'create',
             content:
                 "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n",
         },
         {
-            path: 'src/prisma/prisma.module.ts',
+            path: `${sourceRoot}/prisma/prisma.module.ts`,
             operation: 'create',
             content:
                 "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service.js';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
@@ -828,6 +831,7 @@ function prismaRelationMethods(relations: ResolvedRelation[]): string {
 
 function addTypeOrmInverseRelations(
     projectRoot: string,
+    sourceRoot: string,
     name: string,
     className: string,
     relations: ResolvedRelation[],
@@ -839,7 +843,7 @@ function addTypeOrmInverseRelations(
         byTarget.set(relation.target, group);
     }
     return [...byTarget.entries()].map(([target, targetRelations]) => {
-        const relative = `src/app/${target}/persistence/${target}.entity.ts`;
+        const relative = `${sourceRoot}/app/${target}/persistence/${target}.entity.ts`;
         const source = fs.readFileSync(projectPath(projectRoot, relative), 'utf8');
         const decoratorImport = /import\s*\{\s*([\s\S]*?)\s*\}\s*from 'typeorm';/;
         const importMatch = decoratorImport.exec(source);
@@ -1338,11 +1342,11 @@ export async function generateResource(projectRoot: string, options: Options): P
     const name = options.name.trim().toLowerCase().replaceAll('_', '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) throw new Error('Nom de ressource invalide.');
     const className = pascal(name);
-    const project = inspectProject(projectRoot, orm, { cqrs: false });
+    const project = inspectProject(projectRoot, orm, { cqrs: false, application: options.application });
     projectRoot = project.root;
-    availableFeatureDirectory(projectRoot, name);
+    availableFeatureDirectory(projectRoot, name, project.sourceRoot);
     const appModulePath = project.appModulePath;
-    const relations = resolveRelations(projectRoot, name, orm, options.fields, options.relations);
+    const relations = resolveRelations(projectRoot, project.sourceRoot, name, orm, options.fields, options.relations);
     const fields = [...options.fields, ...relationFields(relations)];
     const indexes = resolvedIndexes(fields, options.indexes);
     const list = options.list ?? { cursor: false, filters: {}, sort: [], search: [] };
@@ -1357,7 +1361,7 @@ export async function generateResource(projectRoot: string, options: Options): P
         );
         const schemaPath = projectPath(projectRoot, 'prisma/schema.prisma');
         const changes: FileChange[] = [...files].map(([relative, content]) => ({
-            path: `src/app/${name}/${relative}`,
+            path: `${project.sourceRoot}/app/${name}/${relative}`,
             content,
             operation: 'create',
         }));
@@ -1373,13 +1377,13 @@ export async function generateResource(projectRoot: string, options: Options): P
             ),
             operation: 'replace',
         });
-        changes.push(...prismaRuntime(projectRoot));
+        changes.push(...prismaRuntime(projectRoot, project.sourceRoot));
         changes.push({
-            path: `src/app/${name}/resource.json`,
+            path: `${project.sourceRoot}/app/${name}/resource.json`,
             content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes, relations: relationManifest(relations), list }, null, 2)}\n`,
             operation: 'create',
         });
-        changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
+        changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
         applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
         return;
     }
@@ -1402,7 +1406,7 @@ export async function generateResource(projectRoot: string, options: Options): P
         relations,
         list,
     );
-    const restTest = generatedRestTest(name, className, fields, options.route, relations);
+    const restTest = generatedRestTest(name, className, fields, options.route, relations, project.sourceRoot);
     const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(
         fs.readFileSync(appModulePath, 'utf8'),
@@ -1411,18 +1415,18 @@ export async function generateResource(projectRoot: string, options: Options): P
         `${className}Module`,
     );
     const changes: FileChange[] = [...files].map(([relative, content]) => ({
-        path: `src/app/${name}/${relative}`,
+        path: `${project.sourceRoot}/app/${name}/${relative}`,
         content,
         operation: 'create',
     }));
     changes.push({ path: restTest.path, content: restTest.content, operation: 'create' });
     changes.push(...[...e2eSupport].map(([file, content]) => ({ path: file, content, operation: 'create' as const })));
-    changes.push(...addTypeOrmInverseRelations(projectRoot, name, className, relations));
+    changes.push(...addTypeOrmInverseRelations(projectRoot, project.sourceRoot, name, className, relations));
     changes.push({
-        path: `src/app/${name}/resource.json`,
+        path: `${project.sourceRoot}/app/${name}/resource.json`,
         content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes, relations: relationManifest(relations), list }, null, 2)}\n`,
         operation: 'create',
     });
-    changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
+    changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
     applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
 }
