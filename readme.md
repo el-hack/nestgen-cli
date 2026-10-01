@@ -227,6 +227,8 @@ Use `--json` in automation to receive one versioned result on stdout. Failures p
 
 Every successful `module` or `resource` generation updates `.nestgen/generation-manifest.json` in the same atomic transaction as the generated files. The versioned manifest records the generator version, a safe structural definition and SHA-256 fingerprints for each generated file. Paths are always project-relative; field default values are deliberately excluded so the manifest can be committed without copying secrets. Later tooling can compare these fingerprints to detect manual edits before proposing an update. An unknown manifest version stops generation before any write.
 
+Use `resource <name> --update` to regenerate a resource after changing its fields, route, table or definition file. NestGen previews the same transaction with `--dry-run`; a generated file edited since its recorded generation is reported as a conflict and blocks all writes. Files not tracked by the resource manifest are left untouched, and the manifest is refreshed only after the complete update commits successfully.
+
 ## Project configuration and profiles
 
 `nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.

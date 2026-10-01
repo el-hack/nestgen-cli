@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
 import { projectPath } from './project-path.js';
-import { resourceGenerationDefinition, withGenerationManifest } from './generation-manifest.js';
+import {
+    loadGenerationManifest,
+    modifiedGeneratedFiles,
+    resourceGenerationDefinition,
+    resourceGenerationKey,
+    withGenerationManifest,
+} from './generation-manifest.js';
 import { applyFileChanges, FileChange, previewFileChanges } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
@@ -27,6 +33,7 @@ type Options = {
     relations?: ResourceRelation[];
     list?: ResourceListOptions;
     application?: string;
+    update?: boolean;
 };
 
 type ResolvedRelation = Required<ResourceRelation> & {
@@ -150,6 +157,30 @@ function relationManifest(relations: ResolvedRelation[]): ResourceRelation[] {
         nullable,
         onDelete,
     }));
+}
+
+function updateResourceChanges(
+    projectRoot: string,
+    sourceRoot: string,
+    name: string,
+    changes: FileChange[],
+): FileChange[] {
+    const resourceRoot = `${sourceRoot}/app/${name}/`;
+    return changes.flatMap((change) => {
+        const exists = fs.existsSync(projectPath(projectRoot, change.path));
+        if (!exists || change.operation === 'replace') return [change];
+        if (!change.path.startsWith(resourceRoot)) return [];
+        return [{ ...change, operation: 'replace' }];
+    });
+}
+
+function resourceUpdateConflicts(projectRoot: string, sourceRoot: string, name: string): Set<string> {
+    const manifest = loadGenerationManifest(projectRoot);
+    const entry = manifest?.generations[resourceGenerationKey(sourceRoot, name)];
+    if (!entry) throw new Error(`Aucun manifeste de génération pour la ressource ${name}.`);
+    if (entry.definition.kind !== 'resource') throw new Error(`Le manifeste de la ressource ${name} est invalide.`);
+    const resourceRoot = `${sourceRoot}/app/${name}/`;
+    return new Set(modifiedGeneratedFiles(projectRoot, entry).filter((file) => file.startsWith(resourceRoot)));
 }
 
 function enumName(className: string, field: ResourceField): string {
@@ -1387,9 +1418,15 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
         });
         changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
         const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+        const updateConflicts = options.update
+            ? resourceUpdateConflicts(projectRoot, project.sourceRoot, name)
+            : new Set<string>();
+        const updateChanges = options.update
+            ? updateResourceChanges(projectRoot, project.sourceRoot, name, formattedChanges)
+            : formattedChanges;
         const changesWithManifest = withGenerationManifest(
             projectRoot,
-            formattedChanges,
+            updateChanges,
             resourceGenerationDefinition(
                 name,
                 orm,
@@ -1403,12 +1440,19 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
                 list,
             ),
         );
+        const preview = previewFileChanges(projectRoot, changesWithManifest).map((change) =>
+            updateConflicts.has(change.path)
+                ? { ...change, status: 'conflict' as const, reason: `Modification manuelle détectée : ${change.path}` }
+                : change,
+        );
         return {
             root: projectRoot,
             changes: changesWithManifest,
-            preview: previewFileChanges(projectRoot, changesWithManifest),
+            preview,
             featureConflict: fs.existsSync(featureDirectory)
-                ? `Le module ou la ressource ${name} existe déjà.`
+                ? options.update
+                    ? undefined
+                    : `Le module ou la ressource ${name} existe déjà.`
                 : undefined,
         };
     }
@@ -1454,9 +1498,15 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
     });
     changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
     const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    const updateConflicts = options.update
+        ? resourceUpdateConflicts(projectRoot, project.sourceRoot, name)
+        : new Set<string>();
+    const updateChanges = options.update
+        ? updateResourceChanges(projectRoot, project.sourceRoot, name, formattedChanges)
+        : formattedChanges;
     const changesWithManifest = withGenerationManifest(
         projectRoot,
-        formattedChanges,
+        updateChanges,
         resourceGenerationDefinition(
             name,
             orm,
@@ -1470,11 +1520,20 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
             list,
         ),
     );
+    const preview = previewFileChanges(projectRoot, changesWithManifest).map((change) =>
+        updateConflicts.has(change.path)
+            ? { ...change, status: 'conflict' as const, reason: `Modification manuelle détectée : ${change.path}` }
+            : change,
+    );
     return {
         root: projectRoot,
         changes: changesWithManifest,
-        preview: previewFileChanges(projectRoot, changesWithManifest),
-        featureConflict: fs.existsSync(featureDirectory) ? `Le module ou la ressource ${name} existe déjà.` : undefined,
+        preview,
+        featureConflict: fs.existsSync(featureDirectory)
+            ? options.update
+                ? undefined
+                : `Le module ou la ressource ${name} existe déjà.`
+            : undefined,
     };
 }
 

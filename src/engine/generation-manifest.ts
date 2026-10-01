@@ -46,6 +46,10 @@ function generationKey(definition: GenerationDefinition): string {
     return `${definition.kind}:${definition.sourceRoot}/app/${definition.name}`;
 }
 
+export function resourceGenerationKey(sourceRoot: string, name: string): string {
+    return `resource:${sourceRoot}/app/${name}`;
+}
+
 function sha256(content: string): string {
     return createHash('sha256').update(content).digest('hex');
 }

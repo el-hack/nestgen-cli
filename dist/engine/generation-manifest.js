@@ -15,6 +15,9 @@ function generatorVersion() {
 function generationKey(definition) {
     return `${definition.kind}:${definition.sourceRoot}/app/${definition.name}`;
 }
+export function resourceGenerationKey(sourceRoot, name) {
+    return `resource:${sourceRoot}/app/${name}`;
+}
 function sha256(content) {
     return createHash('sha256').update(content).digest('hex');
 }
