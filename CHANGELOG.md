@@ -4,6 +4,12 @@ Ce projet suit [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-01
+
+### Fixed
+
+- La vérification de release écrit désormais `release-metadata.json` avec le formatage configuré du dépôt. Le second passage de `prepack` déclenché par `npm publish` peut donc valider le package avant publication.
+
 ## 0.2.0 - 2026-10-01
 
 ### Added

@@ -44,7 +44,7 @@ try {
     assert.equal(artifact.version, version, 'L’archive doit porter la version taggée.');
     assert.match(artifact.integrity, /^sha512-/, 'L’archive doit avoir une intégrité SHA-512.');
     const metadata = { name: packageJson.name, version, tag, commit, integrity: artifact.integrity };
-    if (output) fs.writeFileSync(path.resolve(root, output), `${JSON.stringify(metadata, null, 2)}\n`);
+    if (output) fs.writeFileSync(path.resolve(root, output), `${JSON.stringify(metadata, null, 4)}\n`);
     process.stdout.write(`${JSON.stringify(metadata)}\n`);
 } finally {
     fs.rmSync(directory, { recursive: true, force: true });
