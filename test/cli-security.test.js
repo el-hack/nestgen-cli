@@ -25,6 +25,7 @@ import {
     typescriptType,
 } from '../dist/engine/resource-spec.js';
 import { generateResource, planResourceGeneration } from '../dist/engine/resource-generator.js';
+import { loadGenerationManifest, modifiedGeneratedFiles } from '../dist/engine/generation-manifest.js';
 
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
@@ -419,6 +420,65 @@ test('generates a product resource from its business fields', async () => {
     assert.match(fs.readFileSync(path.join(root, 'resource.json'), 'utf8'), /catalog\/products/);
     assert.match(fs.readFileSync(path.join(root, 'product.module.ts'), 'utf8'), /TypeOrmModule\.forFeature/);
     assert.match(fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'), /ProductModule/);
+});
+
+test('records deterministic safe generation metadata and identifies manual changes', async (t) => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-generation-manifest-'));
+    t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+    await generateResource(fixturePath, {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        fields: [{ name: 'apiKey', type: 'string', nullable: false, unique: false, defaultValue: 'top-secret' }],
+    });
+
+    const manifestPath = path.join(fixturePath, '.nestgen', 'generation-manifest.json');
+    const manifest = loadGenerationManifest(fixturePath);
+    const entry = manifest.generations['resource:src/app/product'];
+    assert.equal(manifest.version, 1);
+    assert.equal(entry.generator.name, 'nestgen-cli');
+    assert.match(entry.generator.version, /^\d+\.\d+\.\d+$/);
+    assert.match(entry.files['src/app/product/product.module.ts'], /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(manifest).includes(fixturePath), false);
+    assert.equal(fs.readFileSync(manifestPath, 'utf8').includes('top-secret'), false);
+    assert.deepEqual(modifiedGeneratedFiles(fixturePath, entry), []);
+
+    fs.appendFileSync(path.join(fixturePath, 'src', 'app', 'product', 'product.module.ts'), '// manual change\n');
+    assert.deepEqual(modifiedGeneratedFiles(fixturePath, entry), ['src/app/product/product.module.ts']);
+});
+
+test('rejects unknown generation manifest versions before writing files', async (t) => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-generation-manifest-version-'));
+    t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(fixturePath, '.nestgen'));
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+    fs.writeFileSync(
+        path.join(fixturePath, '.nestgen', 'generation-manifest.json'),
+        '{"version":2,"generations":{}}\n',
+    );
+
+    await assert.rejects(
+        () =>
+            generateResource(fixturePath, {
+                name: 'product',
+                route: 'products',
+                table: 'products',
+                fields: [{ name: 'sku', type: 'string', nullable: false, unique: false }],
+            }),
+        /Version de manifeste de génération non supportée/,
+    );
+    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'product')), false);
 });
 
 test('generates OpenAPI DTO schemas only when Swagger is installed', async () => {

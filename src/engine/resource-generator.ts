@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
 import { projectPath } from './project-path.js';
+import { resourceGenerationDefinition, withGenerationManifest } from './generation-manifest.js';
 import { applyFileChanges, FileChange, previewFileChanges } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
@@ -1386,10 +1387,26 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
         });
         changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
         const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+        const changesWithManifest = withGenerationManifest(
+            projectRoot,
+            formattedChanges,
+            resourceGenerationDefinition(
+                name,
+                orm,
+                project.sourceRoot,
+                options.route,
+                options.table,
+                profile,
+                options.fields,
+                indexes,
+                relationManifest(relations),
+                list,
+            ),
+        );
         return {
             root: projectRoot,
-            changes: formattedChanges,
-            preview: previewFileChanges(projectRoot, formattedChanges),
+            changes: changesWithManifest,
+            preview: previewFileChanges(projectRoot, changesWithManifest),
             featureConflict: fs.existsSync(featureDirectory)
                 ? `Le module ou la ressource ${name} existe déjà.`
                 : undefined,
@@ -1437,10 +1454,26 @@ export async function planResourceGeneration(projectRoot: string, options: Optio
     });
     changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
     const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    const changesWithManifest = withGenerationManifest(
+        projectRoot,
+        formattedChanges,
+        resourceGenerationDefinition(
+            name,
+            orm,
+            project.sourceRoot,
+            options.route,
+            options.table,
+            profile,
+            options.fields,
+            indexes,
+            relationManifest(relations),
+            list,
+        ),
+    );
     return {
         root: projectRoot,
-        changes: formattedChanges,
-        preview: previewFileChanges(projectRoot, formattedChanges),
+        changes: changesWithManifest,
+        preview: previewFileChanges(projectRoot, changesWithManifest),
         featureConflict: fs.existsSync(featureDirectory) ? `Le module ou la ressource ${name} existe déjà.` : undefined,
     };
 }

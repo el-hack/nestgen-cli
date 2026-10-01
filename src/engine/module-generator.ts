@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { applyFileChanges, FileChange, previewFileChanges, PlannedFileChange } from './file-transaction.js';
 import { inspectProject } from './project-preflight.js';
 import { projectPath } from './project-path.js';
+import { moduleGenerationDefinition, withGenerationManifest } from './generation-manifest.js';
 
 export type Orm = 'typeorm' | 'prisma';
 
@@ -217,10 +218,15 @@ export async function planModuleGeneration(
         changes.push(...prismaRuntimeChanges(projectRoot, project.sourceRoot));
     }
     const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    const changesWithManifest = withGenerationManifest(
+        projectRoot,
+        formattedChanges,
+        moduleGenerationDefinition(resource.name, orm, project.sourceRoot),
+    );
     return {
         root: projectRoot,
-        changes: formattedChanges,
-        preview: previewFileChanges(projectRoot, formattedChanges),
+        changes: changesWithManifest,
+        preview: previewFileChanges(projectRoot, changesWithManifest),
         featureConflict: fs.existsSync(featureDirectory)
             ? `Le module ou la ressource ${resource.name} existe déjà.`
             : undefined,
