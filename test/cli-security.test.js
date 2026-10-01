@@ -594,6 +594,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             version: false,
             dryRun: false,
             update: false,
+            migrationName: undefined,
             json: false,
         },
     });

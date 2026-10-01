@@ -229,6 +229,8 @@ Every successful `module` or `resource` generation updates `.nestgen/generation-
 
 Use `resource <name> --update` to regenerate a resource after changing its fields, route, table or definition file. NestGen previews the same transaction with `--dry-run`; a generated file edited since its recorded generation is reported as a conflict and blocks all writes. Files not tracked by the resource manifest are left untouched, and the manifest is refreshed only after the complete update commits successfully.
 
+Add `--migration-name <name>` to an update to prepare the matching migration command and schema-risk review. TypeORM uses `typeorm-ts-node-commonjs migration:generate`; Prisma uses `prisma migrate dev --create-only`. The CLI never runs this command or applies a migration: review the reported column removals, type changes, mandatory fields, unique constraints and relation removals, then run the printed command explicitly in the generated project.
+
 ## Project configuration and profiles
 
 `nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.
