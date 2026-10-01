@@ -110,6 +110,12 @@ Utilisez `--no-docker`, `--no-swagger`, `--no-operations`, `--no-git` ou `--modu
 
 Ajoutez `--operations` à `init` pour générer un socle local d’exploitation, sans dépendance à un service tiers. Il expose `GET /health/live` pour la disponibilité du processus et `GET /health/ready` pour la disponibilité de PostgreSQL ; le second renvoie `503` avec l’état de la dépendance lorsque la base est indisponible. Le projet reçoit aussi un middleware `x-request-id`, un logger JSON qui masque les clés sensibles (`password`, `secret`, `token`, `authorization`, `cookie`, `apiKey`) et `enableShutdownHooks()` pour fermer proprement TypeORM ou Prisma sur `SIGTERM` et `SIGINT`. Le contrat et ses limites sont documentés dans `src/operations/README.md` du projet généré.
 
+### Points d’extension d’autorisation
+
+Chaque contrôleur de ressource porte désormais `@ResourceAction('create' | 'list' | 'read' | 'update' | 'delete')`, défini dans `src/app/<ressource>/authorization/resource-policy.ts`. Cette métadonnée est destinée à un guard d’application existant via `Reflector`; NestGen ne configure ni fournisseur d’identité, ni stratégie de connexion, ni guard global.
+
+Pour une règle de propriété, déclarez explicitement le propriétaire (`ownerId:uuid`) puis faites charger la ressource par votre guard avant les actions `read`, `update` et `delete`. Le guard compare l’identité déjà établie par votre application avec `resource.ownerId` et retourne `false` lorsqu’elles diffèrent : Nest renvoie alors `403`, y compris pour les accès inter-utilisateurs. Les actions et le nom de ressource restent disponibles dans `ResourcePolicyMetadata`, ce qui permet de centraliser une politique pour plusieurs ressources tout en conservant les conventions Nest standard.
+
 Fields accepted by `resource` are `string`, `number`, `integer`, `decimal(precision;scale)`, `enum(VALUE|VALUE)`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field. A decimal uses a semicolon between precision and scale so a field list can still be separated by commas. Decimals are exposed as JSON strings to preserve their database precision; enums use uppercase values separated by `|`.
 
 `integer` maps to PostgreSQL `integer` / Prisma `Int` and is validated with `@IsInt()`. `decimal(precision;scale)` maps to PostgreSQL `numeric(precision, scale)` / Prisma `Decimal @db.Decimal(precision, scale)` and is validated as a decimal string. `enum(...)` maps to a PostgreSQL enum / a generated Prisma enum and is validated against its declared values.
