@@ -6,7 +6,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { generateModule } from '../dist/engine/module-generator.js';
 import { generateResource } from '../dist/engine/resource-generator.js';
-import { parseResourceFields } from '../dist/engine/resource-spec.js';
+import { parseResourceFields, parseResourceRelations } from '../dist/engine/resource-spec.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typeorm-e2e-'));
 const npmCache = path.join(root, 'npm-cache');
@@ -169,6 +169,19 @@ try {
         indexes: [{ fields: ['sku', 'status'] }],
         profile: 'simple',
     });
+    await generateResource(root, {
+        name: 'customer',
+        route: 'customers',
+        table: 'customers',
+        fields: parseResourceFields(['email:string!']),
+    });
+    await generateResource(root, {
+        name: 'order',
+        route: 'orders',
+        table: 'orders',
+        fields: parseResourceFields(['reference:string!']),
+        relations: parseResourceRelations([{ type: 'belongsTo', target: 'customer', onDelete: 'RESTRICT' }]),
+    });
     await generateModule(root, 'audit-entry', 'typeorm');
     run('npm', ['test', '--', '--runInBand']);
     run('docker', [
@@ -191,6 +204,13 @@ try {
     if (!port) throw new Error('Port PostgreSQL introuvable.');
     waitForPostgres();
     run('npm', ['run', 'test:e2e', '--', 'product.e2e-spec.ts'], root, {
+        DATABASE_HOST: '127.0.0.1',
+        DATABASE_PORT: port,
+        DATABASE_USER: 'nestgen',
+        DATABASE_PASSWORD: 'nestgen',
+        DATABASE_TEST_NAME: 'nestgen',
+    });
+    run('npm', ['run', 'test:e2e', '--', 'order.e2e-spec.ts'], root, {
         DATABASE_HOST: '127.0.0.1',
         DATABASE_PORT: port,
         DATABASE_USER: 'nestgen',

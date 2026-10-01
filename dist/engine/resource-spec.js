@@ -1,4 +1,5 @@
 const namePattern = /^[a-z][a-z0-9]*$/i;
+const resourceNamePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/i;
 const enumValuePattern = /^[A-Z][A-Z0-9_]*$/;
 const basicTypes = new Set(['string', 'number', 'integer', 'boolean', 'date', 'uuid']);
 function parseType(rawType, value) {
@@ -156,6 +157,45 @@ export function parseResourceIndexes(values, fields) {
             throw new Error(`Index déclaré plusieurs fois : ${key}.`);
         seen.add(key);
         return { fields: index };
+    });
+}
+export function parseResourceRelations(values) {
+    const seenFields = new Set();
+    return values.map((value, index) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+            throw new Error(`Relation invalide à l'index ${index}. Un objet est requis.`);
+        const relation = value;
+        if (relation.type !== 'belongsTo')
+            throw new Error(`Relation invalide à l'index ${index}. Seul le type belongsTo est supporté.`);
+        if (typeof relation.target !== 'string' || !resourceNamePattern.test(relation.target))
+            throw new Error(`Relation invalide à l'index ${index}. target doit être un nom de ressource valide.`);
+        if (relation.field !== undefined && (typeof relation.field !== 'string' || !namePattern.test(relation.field)))
+            throw new Error(`Relation invalide à l'index ${index}. field doit être un identifiant valide.`);
+        if (relation.inverse !== undefined &&
+            (typeof relation.inverse !== 'string' || !namePattern.test(relation.inverse)))
+            throw new Error(`Relation invalide à l'index ${index}. inverse doit être un identifiant valide.`);
+        if (relation.nullable !== undefined && typeof relation.nullable !== 'boolean')
+            throw new Error(`Relation invalide à l'index ${index}. nullable doit être un booléen.`);
+        if (relation.onDelete !== undefined && relation.onDelete !== 'RESTRICT' && relation.onDelete !== 'SET NULL')
+            throw new Error(`Relation invalide à l'index ${index}. onDelete accepte RESTRICT ou SET NULL.`);
+        const nullable = relation.nullable ?? false;
+        const onDelete = relation.onDelete ?? 'RESTRICT';
+        if (onDelete === 'SET NULL' && !nullable)
+            throw new Error(`Relation invalide à l'index ${index}. SET NULL requiert nullable: true.`);
+        const target = relation.target.toLowerCase();
+        const field = relation.field ? `${relation.field[0].toLowerCase()}${relation.field.slice(1)}` : undefined;
+        if (field && seenFields.has(field))
+            throw new Error(`Relation invalide à l'index ${index}. Le champ ${field} est déclaré plusieurs fois.`);
+        if (field)
+            seenFields.add(field);
+        return {
+            type: 'belongsTo',
+            target,
+            field,
+            inverse: relation.inverse ? `${relation.inverse[0].toLowerCase()}${relation.inverse.slice(1)}` : undefined,
+            nullable,
+            onDelete,
+        };
     });
 }
 export function typescriptType(field) {

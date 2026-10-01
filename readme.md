@@ -126,11 +126,36 @@ NestGen refuse les combinaisons incompatibles, les bornes inversées et les inde
     "orm": "prisma",
     "profile": "advanced",
     "fields": ["sku:string!", "status:enum(DRAFT|ACTIVE)"],
-    "indexes": ["sku+status"]
+    "indexes": ["sku+status"],
+    "relations": [{ "type": "belongsTo", "target": "category", "onDelete": "RESTRICT" }]
 }
 ```
 
 Le fichier doit être situé dans le projet courant. Les diagnostics indiquent le fichier et le champ ou l’index concerné, et `--dry-run` produit le même plan que la définition équivalente en flags.
+
+## Relations entre ressources
+
+Une relation est déclarée dans le fichier de définition de la ressource enfant. La ressource cible doit déjà avoir été générée avec le même ORM. `belongsTo` crée la clé étrangère, un index et la propriété inverse sur la cible pour former une relation un-à-plusieurs cohérente.
+
+```json
+{
+    "version": 1,
+    "name": "order",
+    "fields": ["reference:string!"],
+    "relations": [
+        {
+            "type": "belongsTo",
+            "target": "customer",
+            "field": "customer",
+            "inverse": "orders",
+            "nullable": false,
+            "onDelete": "RESTRICT"
+        }
+    ]
+}
+```
+
+`field` et `inverse` sont optionnels : NestGen utilise le nom de la ressource cible et un pluriel du nom de la ressource enfant. `nullable` vaut `false` par défaut et `onDelete` vaut `RESTRICT`; les suppressions liées ne déclenchent donc aucune cascade implicite. `SET NULL` est accepté seulement avec `nullable: true`.
 
 On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
 `null` clears only nullable fields and is rejected for other fields. Values such as
