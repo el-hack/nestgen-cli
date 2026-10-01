@@ -331,12 +331,13 @@ async function runInteractiveInit(options) {
 // ────── Commande : MODULE
 async function runModuleGeneration(parsed) {
     if (!parsed.options.quiet) printLogo();
+    const config = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
 
     let moduleName, orm;
 
     if (parsed.positionals[0]) {
         moduleName = validateModuleName(parsed.positionals[0]);
-        orm = validateOrm(parsed.options.orm ?? 'typeorm');
+        orm = validateOrm(parsed.options.orm ?? config.orm);
     } else {
         if (parsed.options.noInteractive) throw new Error('module --no-interactive requiert un nom de module.');
         const answers = await inquirer.prompt([
