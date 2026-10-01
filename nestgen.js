@@ -115,6 +115,7 @@ export function parseCliArgs(args) {
         help: false,
         version: false,
         dryRun: false,
+        update: false,
         json: false,
     };
     const positionals = [];
@@ -158,6 +159,7 @@ export function parseCliArgs(args) {
         else if (argument === '--quiet') options.quiet = true;
         else if (argument === '--verbose') options.verbose = true;
         else if (argument === '--dry-run') options.dryRun = true;
+        else if (argument === '--update') options.update = true;
         else if (argument === '--json') options.json = true;
         else if (argument === '--no-color') options.color = false;
         else if (argument === '--help' || argument === '-h') options.help = true;
@@ -506,6 +508,7 @@ async function runResourceGeneration(parsed) {
             orm,
             profile,
             application: parsed.options.application,
+            update: parsed.options.update,
         });
         const output = dryRunOutput('resource', plan);
         if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
@@ -522,8 +525,9 @@ async function runResourceGeneration(parsed) {
         orm,
         profile,
         application: parsed.options.application,
+        update: parsed.options.update,
     });
-    return { resource: name, orm, profile, generated: true };
+    return { resource: name, orm, profile, generated: true, ...(parsed.options.update ? { updated: true } : {}) };
 }
 
 function printUsage() {
@@ -538,6 +542,7 @@ function printUsage() {
   --git, --no-git               Active ou désactive Git pour init
   --modules <a,b>               Définit les modules init, séparés par des virgules
   --application <nom>           Cible une application d’un workspace Nest
+  --update                     Met à jour une ressource déjà générée sans écraser les fichiers modifiés
   --dry-run                    Affiche le plan sans écrire
   --json                       Retourne un résultat JSON versionné
   --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,

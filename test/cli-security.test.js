@@ -481,6 +481,66 @@ test('rejects unknown generation manifest versions before writing files', async 
     assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'product')), false);
 });
 
+test('updates a resource only when generated files still match its manifest', async (t) => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-update-'));
+    t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+    const initial = {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        fields: parseResourceFields(['sku:string!']),
+    };
+    await generateResource(fixturePath, initial);
+
+    const updated = { ...initial, fields: parseResourceFields(['sku:string!', 'title:string']) };
+    const updatePlan = await planResourceGeneration(fixturePath, { ...updated, update: true });
+    assert.equal(updatePlan.featureConflict, undefined);
+    assert.equal(
+        updatePlan.preview.some((change) => change.status === 'conflict'),
+        false,
+    );
+    assert.equal(
+        updatePlan.preview.some(
+            (change) => change.path === 'src/app/product/product.module.ts' && change.operation === 'replace',
+        ),
+        true,
+    );
+    await generateResource(fixturePath, { ...updated, update: true });
+    assert.match(
+        fs.readFileSync(path.join(fixturePath, 'src', 'app', 'product', 'dto', 'create-product.dto.ts'), 'utf8'),
+        /title/,
+    );
+
+    const manifestPath = path.join(fixturePath, '.nestgen', 'generation-manifest.json');
+    const manifestBeforeConflict = fs.readFileSync(manifestPath, 'utf8');
+    fs.appendFileSync(path.join(fixturePath, 'src', 'app', 'product', 'product.module.ts'), '// user code\n');
+    const conflictingPlan = await planResourceGeneration(fixturePath, {
+        ...updated,
+        fields: parseResourceFields(['sku:string!', 'title:string', 'price:number']),
+        update: true,
+    });
+    assert.match(
+        conflictingPlan.preview.find((change) => change.path === 'src/app/product/product.module.ts').reason,
+        /Modification manuelle détectée/,
+    );
+    await assert.rejects(
+        () =>
+            generateResource(fixturePath, {
+                ...updated,
+                fields: parseResourceFields(['sku:string!', 'title:string', 'price:number']),
+                update: true,
+            }),
+        /Modification manuelle détectée/,
+    );
+    assert.equal(fs.readFileSync(manifestPath, 'utf8'), manifestBeforeConflict);
+});
+
 test('generates OpenAPI DTO schemas only when Swagger is installed', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-openapi-'));
     writeNestManifest(fixturePath);
@@ -533,6 +593,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             help: false,
             version: false,
             dryRun: false,
+            update: false,
             json: false,
         },
     });
