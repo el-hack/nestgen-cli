@@ -2,6 +2,51 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { projectPath } from './project-path.js';
 const transactionDirectory = '.nestgen-transaction';
+function contentDiff(file, before, after) {
+    const removed = before
+        .split(/(?<=\n)/)
+        .map((line) => `-${line}`)
+        .join('');
+    const added = after
+        .split(/(?<=\n)/)
+        .map((line) => `+${line}`)
+        .join('');
+    return `--- ${file}\n+++ ${file}\n@@\n${removed}${added}`;
+}
+/** Inspect the exact file writes of a generation without touching the filesystem. */
+export function previewFileChanges(projectRoot, changes) {
+    const root = fs.realpathSync(projectRoot);
+    const seen = new Set();
+    return changes.map((change) => {
+        let target;
+        try {
+            target = projectPath(root, change.path);
+        }
+        catch (cause) {
+            return {
+                ...change,
+                status: 'conflict',
+                reason: cause instanceof Error ? cause.message : String(cause),
+            };
+        }
+        if (seen.has(target))
+            return { ...change, status: 'conflict', reason: `Destination dupliquée : ${change.path}` };
+        seen.add(target);
+        if (path.relative(root, target).split(path.sep)[0].startsWith(transactionDirectory))
+            return { ...change, status: 'conflict', reason: `Destination réservée : ${change.path}` };
+        const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+        if (change.operation === 'create' && stat)
+            return { ...change, status: 'conflict', reason: `Le fichier existe déjà : ${change.path}` };
+        if (change.operation === 'replace' && !stat?.isFile())
+            return { ...change, status: 'conflict', reason: `Fichier à remplacer introuvable : ${change.path}` };
+        const before = stat ? fs.readFileSync(target, 'utf8') : '';
+        return {
+            ...change,
+            status: change.operation,
+            diff: contentDiff(change.path, before, change.content),
+        };
+    });
+}
 /** Apply a fully validated plan; roll back all applied files when a filesystem operation fails. */
 export function applyFileChanges(projectRoot, changes) {
     const root = fs.realpathSync(projectRoot);

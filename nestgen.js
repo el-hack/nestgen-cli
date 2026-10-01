@@ -7,8 +7,8 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { inspectProject } from './nestjs-generator/features/preflight.mjs';
-import { generateModule } from './dist/engine/module-generator.js';
-import { generateResource } from './dist/engine/resource-generator.js';
+import { generateModule, planModuleGeneration } from './dist/engine/module-generator.js';
+import { generateResource, planResourceGeneration } from './dist/engine/resource-generator.js';
 import {
     parseResourceFields,
     parseResourceIndexes,
@@ -194,6 +194,25 @@ export function createModulePlan(projectRoot, moduleName, orm, sourceRoot = 'src
     };
 }
 
+function dryRunOutput(operation, plan) {
+    const conflicts = [
+        ...(plan.featureConflict ? [{ path: '', reason: plan.featureConflict }] : []),
+        ...plan.preview.filter((change) => change.status === 'conflict').map(({ path, reason }) => ({ path, reason })),
+    ];
+    return {
+        version: 1,
+        operation,
+        changes: plan.preview.map(({ path, operation: fileOperation, status, diff, reason }) => ({
+            path,
+            operation: fileOperation,
+            status,
+            ...(diff ? { diff } : {}),
+            ...(reason ? { reason } : {}),
+        })),
+        conflicts,
+    };
+}
+
 export function runBashScript(scriptPath, args = [], env = {}, quiet = false) {
     const result = spawnSync('bash', [scriptPath, ...args], {
         env: { ...process.env, ...env },
@@ -370,8 +389,8 @@ async function runModuleGeneration(parsed) {
     }
 
     if (parsed.options.dryRun) {
-        const project = inspectProject(process.cwd(), orm, { application: parsed.options.application });
-        console.log(JSON.stringify(createModulePlan(process.cwd(), moduleName, orm, project.sourceRoot), null, 2));
+        const plan = await planModuleGeneration(process.cwd(), moduleName, orm, parsed.options.application);
+        console.log(JSON.stringify(dryRunOutput('module', plan), null, 2));
         return;
     }
 
@@ -471,14 +490,19 @@ async function runResourceGeneration(parsed) {
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
-        inspectProject(process.cwd(), orm, { cqrs: false, application: parsed.options.application });
-        console.log(
-            JSON.stringify(
-                { operation: 'resource', name, route, table, orm, profile, fields, indexes, relations, list },
-                null,
-                2,
-            ),
-        );
+        const plan = await planResourceGeneration(process.cwd(), {
+            name,
+            route,
+            table,
+            fields,
+            indexes,
+            relations,
+            list,
+            orm,
+            profile,
+            application: parsed.options.application,
+        });
+        console.log(JSON.stringify(dryRunOutput('resource', plan), null, 2));
         return;
     }
     await generateResource(process.cwd(), {
