@@ -473,6 +473,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             help: false,
             version: false,
             dryRun: false,
+            json: false,
         },
     });
     const init = parseCliArgs([
@@ -497,6 +498,27 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
     assert.throws(() => parseCliArgs(['module', 'order', '--application']), /requiert une valeur/);
     assert.equal(parseCliArgs(['module', 'order', '--application', 'api']).options.application, 'api');
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
+});
+
+test('emits versioned JSON results and errors for scripts', () => {
+    const version = spawnSync(process.execPath, [cliPath, '--version', '--json'], { encoding: 'utf8' });
+    assert.equal(version.status, 0, version.stderr);
+    assert.deepEqual(JSON.parse(version.stdout), {
+        version: 1,
+        ok: true,
+        command: 'version',
+        result: { cliVersion: packageVersion },
+    });
+    assert.equal(version.stderr, '');
+
+    const invalid = spawnSync(process.execPath, [cliPath, 'module', '--json'], { encoding: 'utf8' });
+    assert.equal(invalid.status, 1);
+    assert.equal(invalid.stdout, '');
+    assert.deepEqual(JSON.parse(invalid.stderr), {
+        version: 1,
+        ok: false,
+        error: { code: 'USAGE', message: 'module --no-interactive requiert un nom de module.' },
+    });
 });
 
 test('applies the advanced resource profile and versioned project configuration', async () => {

@@ -219,6 +219,8 @@ Use `nestgen --help` for the complete accepted option set. Do not rely on undocu
 
 `--dry-run` emits a versioned JSON plan for `module` and `resource`. Each entry identifies the creation or replacement, and includes the exact unified diff that generation would apply. Conflicts are reported in `conflicts`; no file, dependency or installation is changed.
 
+Use `--json` in automation to receive one versioned result on stdout. Failures produce a versioned JSON error on stderr with a stable `USAGE`, `PROJECT_INVALID`, `CONFLICT` or `INTERNAL` code; `--json` also enables non-interactive, quiet and no-color behavior.
+
 ## Project configuration and profiles
 
 `nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.
