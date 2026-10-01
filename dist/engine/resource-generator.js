@@ -18,6 +18,44 @@ function enumName(className, field) {
 function enumValues(field) {
     return field.enumValues.map((value) => `'${value}'`).join(', ');
 }
+function stableSuffix(value) {
+    let hash = 2166136261;
+    for (const character of value)
+        hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    return (hash >>> 0).toString(36);
+}
+function indexName(table, fields) {
+    const value = `idx_${table}_${fields.join('_')}`;
+    return value.length <= 63 ? value : `${value.slice(0, 54)}_${stableSuffix(value)}`;
+}
+function resolvedIndexes(fields, indexes) {
+    const resolved = [
+        ...fields.filter((field) => field.indexed).map((field) => ({ fields: [field.name] })),
+        ...(indexes ?? []),
+    ];
+    const seen = new Set();
+    return resolved.filter((index) => {
+        const key = index.fields.join('+');
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    });
+}
+function defaultLiteral(field) {
+    if (typeof field.defaultValue === 'string')
+        return `'${field.defaultValue.replaceAll("'", "''")}'`;
+    return String(field.defaultValue);
+}
+function prismaDefault(field) {
+    if (field.defaultValue === undefined)
+        return '';
+    if (field.type === 'string')
+        return ` @default(${JSON.stringify(field.defaultValue)})`;
+    if (field.type === 'enum')
+        return ` @default(${field.defaultValue})`;
+    return ` @default(${field.defaultValue})`;
+}
 function entityColumn(field, className) {
     const type = field.type === 'number'
         ? "'double precision'"
@@ -39,6 +77,10 @@ function entityColumn(field, className) {
         options.push(`precision: ${field.precision}`, `scale: ${field.scale}`);
     if (field.type === 'enum')
         options.push(`enum: [${enumValues(field)}]`, `enumName: '${enumName(className, field)}'`);
+    if (field.length !== undefined)
+        options.push(`length: ${field.length}`);
+    if (field.defaultValue !== undefined)
+        options.push(`default: ${defaultLiteral(field)}`);
     if (field.unique)
         options.push('unique: true');
     return `    @Column({ ${options.join(', ')} })\n    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`;
@@ -64,6 +106,12 @@ function validationDecorators(field, optional) {
                             : field.type === 'uuid'
                                 ? '@IsUUID()'
                                 : '@IsString()');
+    if (field.length !== undefined)
+        decorators.push(`@MaxLength(${field.length})`);
+    if (field.min !== undefined)
+        decorators.push(`@Min(${field.min})`);
+    if (field.max !== undefined)
+        decorators.push(`@Max(${field.max})`);
     return decorators;
 }
 function swaggerType(field) {
@@ -88,6 +136,14 @@ function swaggerProperty(field, optional) {
         options.push("format: 'decimal'", "description: 'Nombre décimal transmis sous forme de chaîne pour préserver sa précision.'");
     if (field.type === 'enum')
         options.push(`enum: [${enumValues(field)}]`);
+    if (field.length !== undefined)
+        options.push(`maxLength: ${field.length}`);
+    if (field.min !== undefined)
+        options.push(`minimum: ${field.min}`);
+    if (field.max !== undefined)
+        options.push(`maximum: ${field.max}`);
+    if (field.defaultValue !== undefined)
+        options.push(`default: ${defaultLiteral(field)}`);
     if (field.unique)
         options.push("description: 'Valeur unique.'");
     return `@${required ? 'ApiProperty' : 'ApiPropertyOptional'}({ ${options.join(', ')} })`;
@@ -99,7 +155,7 @@ function swaggerImports(fields, optional) {
 function dtoFields(fields, optional, swagger = false) {
     return fields
         .map((field) => {
-        const isOptional = optional || field.nullable;
+        const isOptional = optional || field.nullable || field.defaultValue !== undefined;
         const type = field.type === 'date' ? 'string' : typescriptType(field);
         return `${swagger ? `    ${swaggerProperty(field, isOptional)}\n` : ''}${validationDecorators(field, isOptional)
             .map((decorator) => `    ${decorator}`)
@@ -108,7 +164,7 @@ function dtoFields(fields, optional, swagger = false) {
         .join('\n\n');
 }
 function validationImports(fields, optional) {
-    const names = fields.flatMap((field) => validationDecorators(field, optional).map((decorator) => decorator.slice(1, decorator.indexOf('('))));
+    const names = fields.flatMap((field) => validationDecorators(field, optional || field.defaultValue !== undefined).map((decorator) => decorator.slice(1, decorator.indexOf('('))));
     return [...new Set(names)].sort().join(', ');
 }
 function propertyMap(fields) {
@@ -133,7 +189,7 @@ function applicationInputMap(fields, optional) {
 }
 function applicationContractFields(fields, optional) {
     return fields
-        .map((field) => `    ${field.name}${optional || field.nullable ? '?' : ''}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
+        .map((field) => `    ${field.name}${optional || field.nullable || field.defaultValue !== undefined ? '?' : ''}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
         .join('\n');
 }
 function applicationContract(name, className, fields) {
@@ -317,14 +373,14 @@ function prismaModelFields(className, fields) {
     return fields
         .map((field) => {
         if (field.type === 'enum')
-            return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}`;
+            return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}${prismaDefault(field)}`;
         if (field.type === 'decimal')
-            return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}`;
-        return `  ${field.name} ${prismaType(field)}`;
+            return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}${prismaDefault(field)}`;
+        return `  ${field.name} ${prismaType(field)}${prismaDefault(field)}`;
     })
         .join('\n');
 }
-function prismaSchema(source, className, table, fields) {
+function prismaSchema(source, className, table, fields, indexes) {
     if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
         throw new Error(`Le modèle Prisma ${className} existe déjà.`);
     const definitions = fields
@@ -335,7 +391,10 @@ function prismaSchema(source, className, table, fields) {
             throw new Error(`L'enum Prisma ${name} existe déjà.`);
         return `enum ${name} {\n${field.enumValues.map((value) => `  ${value}`).join('\n')}\n}`;
     });
-    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}\n\n  @@map("${table}")\n}\n`;
+    const indexDefinitions = indexes
+        .map((index) => `  @@index([${index.fields.join(', ')}], map: "${indexName(table, index.fields)}")`)
+        .join('\n');
+    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
 }
 function prismaRuntime(projectRoot) {
     const service = projectPath(projectRoot, 'src/prisma/prisma.service.ts');
@@ -389,9 +448,12 @@ function prismaResourceFiles(name, className, fields, route) {
         .replace('this.repository.update(id, dto)', 'this.repository.update(id, dto as object)'));
     return files;
 }
-function featureFiles(name, className, fields, route, table, profile, swagger) {
+function featureFiles(name, className, fields, route, table, profile, swagger, indexes) {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
+    const entityIndexes = indexes
+        .map((index) => `@Index('${indexName(table, index.fields)}', [${index.fields.map((field) => `'${field}'`).join(', ')}])`)
+        .join('\n');
     const fieldAssignments = propertyMap(fields);
     const domainProperties = fields
         .map((field) => `    ${field.name}!: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
@@ -401,7 +463,7 @@ function featureFiles(name, className, fields, route, table, profile, swagger) {
     files.set('dto/create-' + name + '.dto.ts', `import { ${validationImports(fields, false)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, false)} } from '@nestjs/swagger';\n` : ''}\nexport class Create${className}Dto {\n${dtoFields(fields, false, swagger)}\n}\n`);
     files.set('dto/update-' + name + '.dto.ts', `import { ${validationImports(fields, true)} } from 'class-validator';\n${swagger ? `import { ${swaggerImports(fields, true)} } from '@nestjs/swagger';\n` : ''}\nexport class Update${className}Dto {\n${dtoFields(fields, true, swagger)}\n}\n`);
     files.set('dto/list-' + name + '.query.ts', `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport const MAX_PAGE_SIZE = 100;\n\nexport class List${className}Query {\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;\n\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;\n}\n`);
-    files.set('persistence/' + name + '.entity.ts', `import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';\n\n@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`);
+    files.set('persistence/' + name + '.entity.ts', `import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';\n\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`);
     if (swagger) {
         const queryPath = 'dto/list-' + name + '.query.ts';
         const query = files.get(queryPath);
@@ -471,6 +533,7 @@ export async function generateResource(projectRoot, options) {
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
         throw new Error('Nom de ressource invalide.');
     const className = pascal(name);
+    const indexes = resolvedIndexes(options.fields, options.indexes);
     const project = inspectProject(projectRoot, orm, { cqrs: false });
     projectRoot = project.root;
     availableFeatureDirectory(projectRoot, name);
@@ -486,13 +549,13 @@ export async function generateResource(projectRoot, options) {
         }));
         changes.push({
             path: 'prisma/schema.prisma',
-            content: prismaSchema(fs.readFileSync(schemaPath, 'utf8'), className, options.table, options.fields),
+            content: prismaSchema(fs.readFileSync(schemaPath, 'utf8'), className, options.table, options.fields, indexes),
             operation: 'replace',
         });
         changes.push(...prismaRuntime(projectRoot));
         changes.push({
             path: `src/app/${name}/resource.json`,
-            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
             operation: 'create',
         });
         changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
@@ -501,7 +564,7 @@ export async function generateResource(projectRoot, options) {
     }
     const manifest = JSON.parse(fs.readFileSync(projectPath(projectRoot, 'package.json'), 'utf8'));
     const swagger = Boolean(manifest.dependencies?.['@nestjs/swagger'] ?? manifest.devDependencies?.['@nestjs/swagger']);
-    const files = featureFiles(name, className, options.fields, options.route, options.table, profile, swagger);
+    const files = featureFiles(name, className, options.fields, options.route, options.table, profile, swagger, indexes);
     const restTest = generatedRestTest(name, className, options.fields, options.route);
     const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
@@ -514,7 +577,7 @@ export async function generateResource(projectRoot, options) {
     changes.push(...[...e2eSupport].map(([file, content]) => ({ path: file, content, operation: 'create' })));
     changes.push({
         path: `src/app/${name}/resource.json`,
-        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
         operation: 'create',
     });
     changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });

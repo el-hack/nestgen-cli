@@ -71,6 +71,8 @@ try {
             .post(route)
             .send({ ...required, ...optional })
             .expect(201);
+        assert.equal(original.body.stock, 0);
+        assert.equal(original.body.category, 'general');
         const resourceUrl = route + '/' + original.body.id;
         for (const field of Object.keys(required)) {
             await api
@@ -93,6 +95,7 @@ try {
         assert.deepEqual(unchanged.body, persisted.body);
 
         const nulls = Object.fromEntries(Object.keys(optional).map((field) => [field, null]));
+        const defaults = { stock: 0, category: 'general' };
         await api.patch(resourceUrl).send(nulls).expect(200);
         const cleared = await api.get(resourceUrl).expect(200);
         assert.deepEqual(cleared.body, { ...persisted.body, ...nulls });
@@ -106,11 +109,11 @@ try {
             .send({ ...required, ...nulls })
             .expect(201);
         const nullRead = await api.get(route + '/' + withNulls.body.id).expect(200);
-        assert.deepEqual(nullRead.body, { id: withNulls.body.id, ...required, ...nulls });
+        assert.deepEqual(nullRead.body, { id: withNulls.body.id, ...required, ...defaults, ...nulls });
         await api.delete(route + '/' + withNulls.body.id).expect(204);
         const omitted = await api.post(route).send(required).expect(201);
         const omittedRead = await api.get(route + '/' + omitted.body.id).expect(200);
-        assert.deepEqual(omittedRead.body, { id: omitted.body.id, ...required, ...nulls });
+        assert.deepEqual(omittedRead.body, { id: omitted.body.id, ...required, ...defaults, ...nulls });
         await api.delete(route + '/' + omitted.body.id).expect(204);
 
         await api
@@ -124,6 +127,14 @@ try {
         await api
             .post(route)
             .send({ ...required, quantity: 1.5 })
+            .expect(400);
+        await api
+            .post(route)
+            .send({ ...required, stock: -1 })
+            .expect(400);
+        await api
+            .post(route)
+            .send({ ...required, category: 'x'.repeat(33) })
             .expect(400);
     }
     step = 'création de la ressource';
