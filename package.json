@@ -42,6 +42,8 @@
         "test:prisma": "node scripts/prisma-integration.mjs",
         "test:docker": "node scripts/docker-config-integration.mjs",
         "test:typeorm": "node scripts/typeorm-http-integration.mjs",
+        "release:verify": "node scripts/release-verify.mjs",
+        "release:verify-remote": "node scripts/release-verify-remote.mjs",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "licenses": "MIT",
