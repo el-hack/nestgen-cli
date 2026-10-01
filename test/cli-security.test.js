@@ -304,6 +304,7 @@ test('generates controlled filters, search and stable sorting for each ORM', asy
     const fields = parseResourceFields(['title:string!', 'price:number', 'published:boolean']);
     const list = parseResourceListOptions(
         {
+            cursor: true,
             filters: { title: ['eq', 'contains'], price: ['gte', 'lt'], published: ['eq'] },
             search: ['title'],
             sort: ['title', 'price'],
@@ -313,6 +314,7 @@ test('generates controlled filters, search and stable sorting for each ORM', asy
     assert.throws(() => parseResourceListOptions({ filters: { missing: ['eq'] } }, fields), /champ inconnu/);
     assert.throws(() => parseResourceListOptions({ filters: { title: ['gt'] } }, fields), /incompatible/);
     assert.throws(() => parseResourceListOptions({ unsupported: true }, fields), /propriété inconnue/);
+    assert.throws(() => parseResourceListOptions({ cursor: 'yes' }, fields), /doit être un booléen/);
     for (const orm of ['typeorm', 'prisma']) {
         const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), `nestgen-${orm}-list-`));
         writeNestManifest(fixturePath);
@@ -343,8 +345,11 @@ test('generates controlled filters, search and stable sorting for each ORM', asy
         assert.match(query, /titleContains\?: string/);
         assert.match(query, /@Type\(\(\) => Number\)[\s\S]*?@IsNumber\(\)[\s\S]*?priceGte\?: number/);
         assert.match(query, /sort\?: string/);
+        assert.match(query, /after\?: string/);
         assert.match(controller, /findMany\([\s\S]*?query,?\s*\)/);
+        assert.match(controller, /nextCursor: result.nextCursor/);
         assert.match(repository, /Tri invalide/);
+        assert.match(repository, /decodeCursor/);
         assert.match(repository, /id: 'asc'|addOrderBy\('product.id', 'ASC'\)/);
         if (orm === 'typeorm') {
             assert.match(repository, /createQueryBuilder\('product'\)/);

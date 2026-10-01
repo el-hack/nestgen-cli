@@ -576,7 +576,10 @@ function listQueryDto(className, list, fields) {
     if (filterFields.some((field) => field.type === 'date'))
         validators.add('IsDate');
     const usesTransform = filterFields.some((field) => field.type === 'boolean');
-    return `import { ${usesTransform ? 'Transform, ' : ''}Type } from 'class-transformer';\nimport { ${[...validators].sort().join(', ')} } from 'class-validator';\n\nexport const MAX_PAGE_SIZE = 100;\n\nexport class List${className}Query {\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;\n\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;${filters ? `\n\n${filters}` : ''}${list.search.length ? `\n\n    @IsOptional()\n    @IsString()\n    q?: string;` : ''}${list.sort.length ? `\n\n    @IsOptional()\n    @IsString()\n    sort?: string;` : ''}\n}\n`;
+    return `import { ${usesTransform ? 'Transform, ' : ''}Type } from 'class-transformer';\nimport { ${[...validators].sort().join(', ')} } from 'class-validator';\n\nexport const MAX_PAGE_SIZE = 100;\n\nexport class List${className}Query {\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    page = 1;\n\n    @IsOptional()\n    @Type(() => Number)\n    @IsInt()\n    @Min(1)\n    @Max(MAX_PAGE_SIZE)\n    limit = 20;${filters ? `\n\n${filters}` : ''}${list.search.length ? `\n\n    @IsOptional()\n    @IsString()\n    q?: string;` : ''}${list.sort.length ? `\n\n    @IsOptional()\n    @IsString()\n    sort?: string;` : ''}${list.cursor ? `\n\n    @IsOptional()\n    @IsString()\n    after?: string;` : ''}\n}\n`;
+}
+function cursorHelpers() {
+    return `    private decodeCursor(value: string): string {\n        try {\n            const cursor = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as { id?: unknown };\n            if (typeof cursor.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor.id)) throw new Error();\n            return cursor.id;\n        } catch {\n            throw new BadRequestException('Curseur invalide.');\n        }\n    }\n\n    private encodeCursor(id: string): string {\n        return Buffer.from(JSON.stringify({ id }), 'utf8').toString('base64url');\n    }`;
 }
 function typeOrmListMethod(className, name, list) {
     const filters = Object.entries(list.filters)
@@ -605,6 +608,8 @@ function typeOrmListMethod(className, name, list) {
         ? `        const sortParts = (query.sort ?? 'id:asc').split(':');\n        const [field, direction = 'asc'] = sortParts;\n        if (sortParts.length > 2 || !${JSON.stringify(['id', ...list.sort])}.includes(field) || !['asc', 'desc'].includes(direction.toLowerCase())) throw new BadRequestException('Tri invalide.');\n        builder.orderBy('${name}.' + field, direction.toUpperCase() as 'ASC' | 'DESC');\n`
         : `        builder.orderBy('${name}.id', 'ASC');\n`;
     const body = `${filters ? `${filters}\n` : ''}${search}${sort}`.replaceAll('query.', 'listQuery.');
+    if (list.cursor)
+        return `    async findMany(skip: number, take: number, query: object): Promise<{ data: ${className}[]; nextCursor?: string }> {\n        const listQuery = query as List${className}Query;\n        if (listQuery.after !== undefined && listQuery.sort !== undefined && listQuery.sort !== 'id:asc') throw new BadRequestException('Le curseur requiert le tri id:asc.');\n        const afterId = listQuery.after === undefined ? undefined : this.decodeCursor(listQuery.after);\n        const builder = this.repository.createQueryBuilder('${name}');\n${body}        if (afterId !== undefined) builder.andWhere('${name}.id > :afterId', { afterId });\n        const values = await builder.addOrderBy('${name}.id', 'ASC').skip(afterId === undefined ? skip : 0).take(take + 1).getMany();\n        const data = values.slice(0, take).map((value) => this.toDomain(value));\n        const last = data.at(-1);\n        return { data, nextCursor: values.length > take && last && (listQuery.sort ?? 'id:asc') === 'id:asc' ? this.encodeCursor(last.id) : undefined };\n    }`;
     return `    async findMany(skip: number, take: number, query: object): Promise<${className}[]> {\n        const listQuery = query as List${className}Query;\n        const builder = this.repository.createQueryBuilder('${name}');\n${body}        builder.addOrderBy('${name}.id', 'ASC').skip(skip).take(take);\n        return (await builder.getMany()).map((value) => this.toDomain(value));\n    }`;
 }
 function prismaListMethod(className, list) {
@@ -627,6 +632,8 @@ function prismaListMethod(className, list) {
     const sort = list.sort.length
         ? `        const sortParts = (query.sort ?? 'id:asc').split(':');\n        const [field, direction = 'asc'] = sortParts;\n        if (sortParts.length > 2 || !${JSON.stringify(['id', ...list.sort])}.includes(field) || !['asc', 'desc'].includes(direction.toLowerCase())) throw new BadRequestException('Tri invalide.');\n        const orderBy = [{ [field]: direction.toLowerCase() }, { id: 'asc' }];\n`
         : `        const orderBy = [{ id: 'asc' }];\n`;
+    if (list.cursor)
+        return `    async findMany(skip: number, take: number, query: List${className}Query): Promise<{ data: ${className}[]; nextCursor?: string }> {\n        if (query.after !== undefined && query.sort !== undefined && query.sort !== 'id:asc') throw new BadRequestException('Le curseur requiert le tri id:asc.');\n        const afterId = query.after === undefined ? undefined : this.decodeCursor(query.after);\n        const where: Record<string, unknown> = {};\n${filters ? `${filters}\n` : ''}${search}${sort}        const values = await this.model.findMany({ skip: afterId === undefined ? skip : 1, take: take + 1, cursor: afterId === undefined ? undefined : { id: afterId }, where, orderBy } as never);\n        const data = values.slice(0, take).map((value) => this.toDomain(value));\n        const last = data.at(-1);\n        return { data, nextCursor: values.length > take && last && (query.sort ?? 'id:asc') === 'id:asc' ? this.encodeCursor(last.id) : undefined };\n    }`;
     return `    async findMany(skip: number, take: number, query: List${className}Query): Promise<${className}[]> {\n        const where: Record<string, unknown> = {};\n${filters ? `${filters}\n` : ''}${search}${sort}        return (await this.model.findMany({ skip, take, where, orderBy } as never)).map((value) => this.toDomain(value));\n    }`;
 }
 function manyToManyRelations(relations) {
@@ -788,14 +795,15 @@ function prismaResourceFiles(name, className, fields, route, relations, list) {
         .get(repositoryPath)
         .replace(`private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};`, `private get model() { return this.prisma.${className[0].toLowerCase() + className.slice(1)}; }`)
         .replaceAll('input: Record<string, unknown>', 'input: object'));
-    const hasListFeatures = Object.keys(list.filters).length > 0 || list.search.length > 0 || list.sort.length > 0;
+    const hasListFeatures = list.cursor || Object.keys(list.filters).length > 0 || list.search.length > 0 || list.sort.length > 0;
     if (hasListFeatures) {
         files.set(repositoryPath, files
             .get(repositoryPath)
-            .replace(`import { ${className} } from '../domain/${name}.js';`, `import { ${className} } from '../domain/${name}.js';\nimport { List${className}Query } from '../dto/list-${name}.query.js';`)
+            .replace(`import { ${className} } from '../domain/${name}.js';`, `${list.cursor ? "import { Buffer } from 'node:buffer';\n" : ''}import { ${className} } from '../domain/${name}.js';\nimport { List${className}Query } from '../dto/list-${name}.query.js';`)
             .replace(`import { ${className}Entity } from './${name}.entity.js';`, `import { BadRequestException } from '@nestjs/common';\nimport { ${className}Entity } from './${name}.entity.js';`)
             .replace(`import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';`, `import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';`)
-            .replace(/    async findMany[\s\S]*?\n    async update/, `${prismaListMethod(className, list)}\n\n    async update`));
+            .replace(/    async findMany[\s\S]*?\n    async update/, `${prismaListMethod(className, list)}\n\n    async update`)
+            .replace('    private toDomain', list.cursor ? `${cursorHelpers()}\n\n    private toDomain` : '    private toDomain'));
     }
     const controllerPath = `${name}.controller.ts`;
     files.set(controllerPath, files
@@ -807,6 +815,11 @@ function prismaResourceFiles(name, className, fields, route, relations, list) {
         files.set(controllerPath, files
             .get(controllerPath)
             .replace('this.repository.findMany((query.page - 1) * query.limit, query.limit)', 'this.repository.findMany((query.page - 1) * query.limit, query.limit, query)'));
+    }
+    if (list.cursor) {
+        files.set(controllerPath, files
+            .get(controllerPath)
+            .replace('return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit, query) };', 'const result = await this.repository.findMany((query.page - 1) * query.limit, query.limit, query);\n    return { page: query.page, limit: query.limit, data: result.data, nextCursor: result.nextCursor };'));
     }
     return files;
 }
@@ -859,15 +872,16 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
         ? `new ${className}ConflictError('Cette ressource est référencée par une autre ressource.')`
         : `new ConflictException('Cette ressource est référencée par une autre ressource.')`;
     files.set('persistence/' + name + '.repository.ts', `${persistenceImports}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: ${persistenceInputTypes}): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw ${missingError};\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: ${persistenceUpdateTypes}): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw ${missingError};\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        try {\n            const result = await this.repository.delete(id);\n            if (!result.affected) throw ${missingError};\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw ${conflictError};\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23503')\n            throw ${foreignKeyConflictError};\n        throw error;\n    }\n}\n`);
-    const hasListFeatures = Object.keys(list.filters).length > 0 || list.search.length > 0 || list.sort.length > 0;
+    const hasListFeatures = list.cursor || Object.keys(list.filters).length > 0 || list.search.length > 0 || list.sort.length > 0;
     if (hasListFeatures) {
         const repositoryPath = 'persistence/' + name + '.repository.ts';
         files.set(repositoryPath, files
             .get(repositoryPath)
-            .replace(`import { ${className} } from '../domain/${name}.js';`, `import { ${className} } from '../domain/${name}.js';\nimport { List${className}Query } from '../dto/list-${name}.query.js';`)
+            .replace(`import { ${className} } from '../domain/${name}.js';`, `${list.cursor ? "import { Buffer } from 'node:buffer';\n" : ''}import { ${className} } from '../domain/${name}.js';\nimport { List${className}Query } from '../dto/list-${name}.query.js';`)
             .replace("import { Injectable } from '@nestjs/common';", "import { BadRequestException, Injectable } from '@nestjs/common';")
             .replace("import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';", "import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';")
-            .replace(/    async findMany[\s\S]*?\n    async update/, `${typeOrmListMethod(className, name, list)}\n\n    async update`));
+            .replace(/    async findMany[\s\S]*?\n    async update/, `${typeOrmListMethod(className, name, list)}\n\n    async update`)
+            .replace('    private toDomain', list.cursor ? `${cursorHelpers()}\n\n    private toDomain` : '    private toDomain'));
     }
     if (manyRelations.length) {
         const persistencePath = 'persistence/' + name + '.repository.ts';
@@ -891,6 +905,14 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
                 .get(servicePath)
                 .replace('findMany(skip: number, take: number):', 'findMany(skip: number, take: number, query: object):')
                 .replace('this.repository.findMany(skip, take)', 'this.repository.findMany(skip, take, query)'));
+            if (list.cursor) {
+                files.set(portPath, files
+                    .get(portPath)
+                    .replace(`findMany(skip: number, take: number, query: object): Promise<${className}[]>;`, `findMany(skip: number, take: number, query: object): Promise<{ data: ${className}[]; nextCursor?: string }>;`));
+                files.set(servicePath, files
+                    .get(servicePath)
+                    .replace(`async findMany(skip: number, take: number, query: object): Promise<${className}Output[]> {\n        return (await this.repository.findMany(skip, take, query)).map((value) => this.toOutput(value));\n    }`, `async findMany(skip: number, take: number, query: object): Promise<{ data: ${className}Output[]; nextCursor?: string }> {\n        const result = await this.repository.findMany(skip, take, query);\n        return { data: result.data.map((value) => this.toOutput(value)), nextCursor: result.nextCursor };\n    }`));
+            }
         }
         if (manyRelations.length) {
             const portPath = `application/ports/${name}.repository.port.ts`;
@@ -929,6 +951,15 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
         files.set(controllerPath, files
             .get(controllerPath)
             .replace(`.${controllerTarget}.findMany(skip, query.limit)`, `.${controllerTarget}.findMany(skip, query.limit, query)`));
+    }
+    if (list.cursor) {
+        const controllerPath = name + '.controller.ts';
+        const invocation = advanced
+            ? `this.respond(this.${controllerTarget}.findMany(skip, query.limit, query))`
+            : `this.${controllerTarget}.findMany(skip, query.limit, query)`;
+        files.set(controllerPath, files
+            .get(controllerPath)
+            .replace(`return { page: query.page, limit: query.limit, data: await ${invocation} };`, `const result = await ${invocation};\n        return { page: query.page, limit: query.limit, data: result.data, nextCursor: result.nextCursor };`));
     }
     if (manyRelations.length) {
         const controllerPath = name + '.controller.ts';
@@ -976,7 +1007,7 @@ export async function generateResource(projectRoot, options) {
     const relations = resolveRelations(projectRoot, name, orm, options.fields, options.relations);
     const fields = [...options.fields, ...relationFields(relations)];
     const indexes = resolvedIndexes(fields, options.indexes);
-    const list = options.list ?? { filters: {}, sort: [], search: [] };
+    const list = options.list ?? { cursor: false, filters: {}, sort: [], search: [] };
     if (orm === 'prisma') {
         const files = prismaResourceFiles(name, className, fields, options.route, relations, list);
         const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);

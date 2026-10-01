@@ -214,12 +214,14 @@ const filterOperatorsByType = {
 };
 export function parseResourceListOptions(value, fields) {
     if (value === undefined)
-        return { filters: {}, sort: [], search: [] };
+        return { cursor: false, filters: {}, sort: [], search: [] };
     if (!value || typeof value !== 'object' || Array.isArray(value))
         throw new Error('list doit être un objet.');
     const list = value;
-    if (Object.keys(list).some((key) => !['filters', 'sort', 'search'].includes(key)))
+    if (Object.keys(list).some((key) => !['cursor', 'filters', 'sort', 'search'].includes(key)))
         throw new Error('list contient une propriété inconnue.');
+    if (list.cursor !== undefined && typeof list.cursor !== 'boolean')
+        throw new Error('list.cursor doit être un booléen.');
     const knownFields = new Map(fields.map((field) => [field.name, field]));
     const filtersRaw = list.filters ?? {};
     if (!filtersRaw || typeof filtersRaw !== 'object' || Array.isArray(filtersRaw))
@@ -254,6 +256,7 @@ export function parseResourceListOptions(value, fields) {
         return values;
     };
     return {
+        cursor: list.cursor ?? false,
         filters,
         sort: parseFieldList('sort', () => true),
         search: parseFieldList('search', (field) => field.type === 'string'),
