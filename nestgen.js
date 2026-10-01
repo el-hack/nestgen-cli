@@ -115,6 +115,7 @@ export function parseCliArgs(args) {
         help: false,
         version: false,
         dryRun: false,
+        json: false,
     };
     const positionals = [];
     for (let index = 0; index < args.length; index += 1) {
@@ -157,6 +158,7 @@ export function parseCliArgs(args) {
         else if (argument === '--quiet') options.quiet = true;
         else if (argument === '--verbose') options.verbose = true;
         else if (argument === '--dry-run') options.dryRun = true;
+        else if (argument === '--json') options.json = true;
         else if (argument === '--no-color') options.color = false;
         else if (argument === '--help' || argument === '-h') options.help = true;
         else if (argument === '--version' || argument === '-V') options.version = true;
@@ -349,8 +351,9 @@ async function runInteractiveInit(options) {
         MODULES: modules.map(validateModuleName).join(' '),
     };
 
-    console.log('\n🚀 Lancement de la génération du projet...\n');
-    runBashScript(GENERATE_SCRIPT, [], env);
+    if (!options.quiet) console.log('\n🚀 Lancement de la génération du projet...\n');
+    runBashScript(GENERATE_SCRIPT, [], env, options.quiet);
+    return { projectName: env.APP_NAME, projectPath: env.PROJECT_PATH, packageManager: env.PM, orm: env.ORM };
 }
 
 // ────── Commande : MODULE
@@ -390,17 +393,19 @@ async function runModuleGeneration(parsed) {
 
     if (parsed.options.dryRun) {
         const plan = await planModuleGeneration(process.cwd(), moduleName, orm, parsed.options.application);
-        console.log(JSON.stringify(dryRunOutput('module', plan), null, 2));
-        return;
+        const output = dryRunOutput('module', plan);
+        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
+        return output;
     }
 
     if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
     if (process.env.NESTGEN_ROOT) {
         runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], {}, parsed.options.quiet);
-        return;
+        return { module: moduleName, orm, generated: true };
     }
 
     await generateModule(process.cwd(), moduleName, orm, parsed.options.application);
+    return { module: moduleName, orm, generated: true };
 }
 
 export function loadResourceDefinition(file, projectRoot = process.cwd()) {
@@ -502,8 +507,9 @@ async function runResourceGeneration(parsed) {
             profile,
             application: parsed.options.application,
         });
-        console.log(JSON.stringify(dryRunOutput('resource', plan), null, 2));
-        return;
+        const output = dryRunOutput('resource', plan);
+        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
+        return output;
     }
     await generateResource(process.cwd(), {
         name,
@@ -517,6 +523,7 @@ async function runResourceGeneration(parsed) {
         profile,
         application: parsed.options.application,
     });
+    return { resource: name, orm, profile, generated: true };
 }
 
 function printUsage() {
@@ -532,11 +539,12 @@ function printUsage() {
   --modules <a,b>               Définit les modules init, séparés par des virgules
   --application <nom>           Cible une application d’un workspace Nest
   --dry-run                    Affiche le plan sans écrire
+  --json                       Retourne un résultat JSON versionné
   --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
     );
 }
 
-function runDoctor() {
+function runDoctor(machine = false) {
     const checks = [
         [
             'Node.js',
@@ -551,53 +559,85 @@ function runDoctor() {
             'Réinstalle NestGen.',
         ],
     ];
-    for (const [name, detail, valid, advice] of checks)
-        console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
+    if (!machine)
+        for (const [name, detail, valid, advice] of checks)
+            console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
+    let project;
     try {
-        const project = inspectProject(process.cwd(), 'typeorm');
-        console.log(
-            `OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`,
-        );
+        project = inspectProject(process.cwd(), 'typeorm');
+        if (!machine)
+            console.log(
+                `OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`,
+            );
     } catch (error) {
-        console.log(
-            `INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`,
-        );
+        project = { error: error.message };
+        if (!machine)
+            console.log(
+                `INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`,
+            );
     }
     if (checks.some(([, , valid]) => !valid)) throw new Error('Des prérequis NestGen sont manquants.');
+    return { checks: checks.map(([name, detail, valid, advice]) => ({ name, detail, valid, advice })), project };
+}
+
+function machineResult(command, result) {
+    return { version: 1, ok: true, command, result };
+}
+
+function errorCode(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/^(Option inconnue|Commande inconnue|.* requiert |Route ou table invalide|Nom de )/.test(message))
+        return 'USAGE';
+    if (message.startsWith('Préflight échoué')) return 'PROJECT_INVALID';
+    if (/(existe déjà|Destination |Conflit |Transaction interrompue)/.test(message)) return 'CONFLICT';
+    return 'INTERNAL';
 }
 
 // ────── Entrée CLI
 export async function main(args = process.argv.slice(2)) {
     const parsed = parseCliArgs(args);
+    const machine = parsed.options.json;
+    if (machine) {
+        parsed.options.quiet = true;
+        parsed.options.color = false;
+        parsed.options.noInteractive = true;
+    }
     if (!parsed.options.color) chalk.level = 0;
     if (parsed.options.version) {
         const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-        console.log(packageJson.version);
-        return;
+        const result = { cliVersion: packageJson.version };
+        console.log(machine ? JSON.stringify(machineResult('version', result)) : packageJson.version);
+        return result;
     }
     if (parsed.options.help || !parsed.command) {
-        printUsage();
+        if (machine)
+            console.log(
+                JSON.stringify(machineResult('help', { commands: ['init', 'module', 'resource', 'config', 'doctor'] })),
+            );
+        else printUsage();
         return;
     }
 
+    let result;
     switch (parsed.command) {
         case 'init':
             if (parsed.positionals.length > 1) throw new Error('init accepte au plus un nom de projet.');
-            await runInteractiveInit({ ...parsed.options, projectName: parsed.positionals[0] });
+            result = await runInteractiveInit({ ...parsed.options, projectName: parsed.positionals[0] });
             break;
 
         case 'module':
-            await runModuleGeneration(parsed);
+            result = await runModuleGeneration(parsed);
             break;
 
         case 'resource':
-            await runResourceGeneration(parsed);
+            result = await runResourceGeneration(parsed);
             break;
 
         case 'config': {
             const action = parsed.positionals[0];
             if (action === 'show') {
-                console.log(JSON.stringify(loadConfigIfPresent(process.cwd()) ?? defaultConfig, null, 2));
+                result = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
+                if (!machine) console.log(JSON.stringify(result, null, 2));
                 break;
             }
             if (action === 'init') {
@@ -610,28 +650,35 @@ export async function main(args = process.argv.slice(2)) {
                 if (!['npm', 'pnpm', 'yarn'].includes(config.packageManager))
                     throw new Error('Package manager invalide.');
                 if (parsed.options.dryRun) {
-                    console.log(JSON.stringify({ operation: 'config-init', file: configFileName, config }, null, 2));
+                    result = { operation: 'config-init', file: configFileName, config };
+                    if (!machine) console.log(JSON.stringify(result, null, 2));
                     break;
                 }
                 writeConfig(process.cwd(), config);
-                console.log(configFileName);
+                result = { file: configFileName, created: true, config };
+                if (!machine) console.log(configFileName);
                 break;
             }
             throw new Error('config requiert init ou show.');
         }
 
         case 'doctor':
-            runDoctor();
+            result = runDoctor(machine);
             break;
 
         default:
             throw new Error(`Commande inconnue : ${parsed.command}. Utilise --help.`);
     }
+    if (machine) console.log(JSON.stringify(machineResult(parsed.command, result)));
+    return result;
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === __filename) {
     main().catch((error) => {
-        console.error(chalk.red(`❌ ${error.message}`));
+        if (process.argv.includes('--json')) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(JSON.stringify({ version: 1, ok: false, error: { code: errorCode(error), message } }));
+        } else console.error(chalk.red(`❌ ${error.message}`));
         process.exitCode = 1;
     });
 }
