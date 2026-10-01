@@ -221,6 +221,8 @@ Use `nestgen --help` for the complete accepted option set. Do not rely on undocu
 
 Use `--json` in automation to receive one versioned result on stdout. Failures produce a versioned JSON error on stderr with a stable `USAGE`, `PROJECT_INVALID`, `CONFLICT` or `INTERNAL` code; `--json` also enables non-interactive, quiet and no-color behavior.
 
+`nestgen doctor` is read-only. It reports version support, generator availability, Nest dependencies, ORM coherence, NestGen configuration, lockfile consistency and Nest integration. Every diagnostic has an identifier, severity, cause and concrete corrective action; use `nestgen doctor --json` for the same contract in automation.
+
 ## Project configuration and profiles
 
 `nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.
