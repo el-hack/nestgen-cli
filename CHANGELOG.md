@@ -4,6 +4,20 @@ Ce projet suit [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-01
+
+### Added
+
+- Définitions de ressources versionnées, types entier/décimal/enum, contraintes, index, relations, filtres, recherche, tri et pagination par curseur.
+- Mises à jour de ressources protégées par manifeste, aperçu transactionnel, plan de migration TypeORM/Prisma et sorties JSON versionnées.
+- Socle d’exploitation optionnel, métadonnées d’autorisation pour guards existants, diagnostic enrichi et support des workspaces Nest.
+- Documentation versionnée, exemple Store API reconstruit en CI et contrat de landing aligné sur le paquet npm publié.
+
+### Changed
+
+- La CI couvre Node 24–26, macOS/Linux, npm/pnpm/Yarn, Docker, Prisma, TypeORM, tarball npm et parcours de démonstration.
+- Les releases vérifient le tag, le commit, le changelog, la documentation, l’intégrité de l’archive et l’installation isolée du binaire.
+
 ## 0.1.0 - 2026-09-30
 
 ### Added

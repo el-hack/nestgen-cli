@@ -38,7 +38,10 @@ function assertLocalLinks(document, source) {
 }
 
 assert.match(landing, new RegExp(`npm install --global nestgen-cli@${version.replaceAll('.', '\\.')}`));
-assert.match(landing, /## Published in 0\.1\.0 \/ Disponible dans 0\.1\.0/);
+assert.match(
+    landing,
+    new RegExp(`## Published in ${version.replaceAll('.', '\\.')} / Disponible dans ${version.replaceAll('.', '\\.')}`),
+);
 assert.match(landing, /## Planned \(not released\) \/ Prévu \(non publié\)/);
 assert.match(landing, /## Public demo \/ Démonstration publique/);
 assert.match(landing, /npm run test:example/);

@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "cliVersion": "0.1.0",
+    "cliVersion": "0.2.0",
     "orm": "typeorm",
     "profile": "advanced",
     "resources": ["customers", "products", "orders", "order-items"]
