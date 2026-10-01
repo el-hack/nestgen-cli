@@ -223,6 +223,10 @@ Use `--json` in automation to receive one versioned result on stdout. Failures p
 
 `nestgen doctor` is read-only. It reports version support, generator availability, Nest dependencies, ORM coherence, NestGen configuration, lockfile consistency and Nest integration. Every diagnostic has an identifier, severity, cause and concrete corrective action; use `nestgen doctor --json` for the same contract in automation.
 
+## Generation metadata
+
+Every successful `module` or `resource` generation updates `.nestgen/generation-manifest.json` in the same atomic transaction as the generated files. The versioned manifest records the generator version, a safe structural definition and SHA-256 fingerprints for each generated file. Paths are always project-relative; field default values are deliberately excluded so the manifest can be committed without copying secrets. Later tooling can compare these fingerprints to detect manual edits before proposing an update. An unknown manifest version stops generation before any write.
+
 ## Project configuration and profiles
 
 `nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. The generator resolves the effective source root from `nest-cli.json`; use `--application <name>` when a Nest workspace contains more than one application.

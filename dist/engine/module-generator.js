@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { applyFileChanges, previewFileChanges } from './file-transaction.js';
 import { inspectProject } from './project-preflight.js';
 import { projectPath } from './project-path.js';
+import { moduleGenerationDefinition, withGenerationManifest } from './generation-manifest.js';
 function describe(rawName) {
     const name = rawName.trim().toLowerCase().replace(/_/g, '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
@@ -135,10 +136,11 @@ export async function planModuleGeneration(projectRoot, rawName, orm, applicatio
         changes.push(...prismaRuntimeChanges(projectRoot, project.sourceRoot));
     }
     const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    const changesWithManifest = withGenerationManifest(projectRoot, formattedChanges, moduleGenerationDefinition(resource.name, orm, project.sourceRoot));
     return {
         root: projectRoot,
-        changes: formattedChanges,
-        preview: previewFileChanges(projectRoot, formattedChanges),
+        changes: changesWithManifest,
+        preview: previewFileChanges(projectRoot, changesWithManifest),
         featureConflict: fs.existsSync(featureDirectory)
             ? `Le module ou la ressource ${resource.name} existe déjà.`
             : undefined,
