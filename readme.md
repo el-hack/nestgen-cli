@@ -17,6 +17,12 @@ NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources
 
 The repository CI executes generator contracts on the declared Node lines and on Linux and macOS. Windows users are supported through WSL2, whose Linux environment is covered by the Ubuntu runner. On Ubuntu/Node 24.15 it additionally validates Prisma, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, package-manager lockfile creation and locked reinstallation for npm, pnpm and Yarn, and the npm tarball. It does not publish releases or deploy applications. See [COMPATIBILITY.md](COMPATIBILITY.md) for the exact coverage and exclusions.
 
+## Releases
+
+Create releases from an annotated `vX.Y.Z` tag that points to the commit containing the same version in `package.json` and `package-lock.json`, plus a matching `CHANGELOG.md` section. The tag triggers the release workflow, which builds the package, verifies the tag/commit/version/archive SHA-512 relationship, publishes with npm Trusted Publishing (GitHub OIDC, no npm token in the repository), checks the npm `latest` dist-tag and archive integrity, then installs and runs the published binary in a clean directory.
+
+Before the first release, configure `el-hack/nestgen-cli` as a Trusted Publisher in npm for the `Release` workflow. If publication fails before npm accepts the version, repair the release commit and replace the unpublished tag. If npm has accepted the version but a later registry check fails, do not republish that version: investigate the immutable tarball, correct the issue in a new SemVer version, then publish a new tag. The workflow creates the GitHub release only after the isolated install succeeds.
+
 ## Outputs by ORM
 
 | Command                         | ORM     | Persistence output                                                                                                                   |

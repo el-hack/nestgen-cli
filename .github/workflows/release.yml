@@ -1,0 +1,35 @@
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: write
+    id-token: write
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.ref }}
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24.15.0
+                  registry-url: https://registry.npmjs.org
+                  cache: npm
+            - run: npm ci
+            - run: npm run prepack
+            - name: Verify release identity and archive
+              run: node scripts/release-verify.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --output release-metadata.json
+            # Configure this repository as an npm Trusted Publisher. OIDC avoids a long-lived npm token.
+            - run: npm publish --provenance --access public
+            - name: Verify npm registry and isolated install
+              run: node scripts/release-verify-remote.mjs release-metadata.json
+            - name: Create GitHub release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
