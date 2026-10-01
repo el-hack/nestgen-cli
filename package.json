@@ -4,6 +4,7 @@
     "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
     "files": [
         "dist",
+        "examples",
         "nestgen.js",
         "nestjs-generator"
     ],
@@ -35,12 +36,13 @@
         "check": "npm run typecheck && eslint .",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "prepack": "npm run build && npm run check && npm run format:check && npm test",
+        "prepack": "npm run build && npm run check && npm run docs:check && npm run format:check && npm test && npm run test:example",
         "test": "node --test",
         "test:package": "node scripts/package-smoke.mjs",
         "test:package-manager": "node scripts/package-manager-lockfile-integration.mjs",
         "test:prisma": "node scripts/prisma-integration.mjs",
         "test:docker": "node scripts/docker-config-integration.mjs",
+        "test:example": "node scripts/example-store-api-integration.mjs",
         "test:typeorm": "node scripts/typeorm-http-integration.mjs",
         "release:verify": "node scripts/release-verify.mjs",
         "release:verify-remote": "node scripts/release-verify-remote.mjs",

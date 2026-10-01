@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "cliVersion": "0.1.0",
+    "orm": "typeorm",
+    "profile": "advanced",
+    "resources": ["customers", "products", "orders", "order-items"]
+}
