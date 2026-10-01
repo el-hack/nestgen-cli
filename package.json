@@ -44,6 +44,7 @@
         "test:typeorm": "node scripts/typeorm-http-integration.mjs",
         "release:verify": "node scripts/release-verify.mjs",
         "release:verify-remote": "node scripts/release-verify-remote.mjs",
+        "docs:check": "node scripts/docs-contract.mjs",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "licenses": "MIT",

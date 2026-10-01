@@ -30,6 +30,8 @@ assert.match(
     new RegExp(`^## ${version.replaceAll('.', '\\.')}(?:\\s|-)`, 'm'),
     'CHANGELOG.md doit contenir une section pour la version publiée.',
 );
+const guide = fs.readFileSync(path.join(root, 'docs', 'versions', `${version}.md`), 'utf8');
+assert.match(guide, new RegExp(`^# NestGen CLI ${version.replaceAll('.', '\\.')}$`, 'm'));
 assert.equal(run('git', ['rev-parse', `${tag}^{commit}`]), commit, 'Le tag doit pointer sur le commit publié.');
 assert.equal(run('git', ['rev-parse', 'HEAD']), commit, 'Le workflow doit publier le commit taggé.');
 

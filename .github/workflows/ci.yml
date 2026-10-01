@@ -34,6 +34,7 @@ jobs:
                   cache: npm
             - run: npm ci
             - run: npm run check
+            - run: npm run docs:check
             - run: npm run format:check
             - run: npm test
 
