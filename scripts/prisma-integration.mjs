@@ -3,7 +3,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { generateModule } from '../dist/engine/module-generator.js';
+import { generateResource } from '../dist/engine/resource-generator.js';
+import { parseResourceFields } from '../dist/engine/resource-spec.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-e2e-'));
 const npmCache = path.join(root, 'npm-cache');
@@ -87,7 +88,13 @@ try {
     );
 
     run('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund']);
-    await generateModule(root, 'invoice', 'prisma');
+    await generateResource(root, {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        orm: 'prisma',
+        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']),
+    });
     run('docker', [
         'run',
         '--detach',
@@ -116,7 +123,7 @@ try {
     run('npx', ['tsc', '--noEmit']);
     fs.writeFileSync(
         path.join(root, 'persist.mjs'),
-        "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { InvoiceRepositoryToken } from './build/app/invoice/core/domain/ports/invoice.repository.js';\nimport { Invoice } from './build/app/invoice/core/domain/entities/invoice.entity.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(InvoiceRepositoryToken, { strict: false }); const saved = await repository.save(new Invoice(undefined, 'Integration', 'integration@example.test')); const found = await repository.findById(saved.id); if (found?.email !== 'integration@example.test') throw new Error('persisted record was not found'); } finally { await app.close(); }\n",
+        "import 'reflect-metadata';\nimport { ConflictException, NotFoundException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { ProductRepository } from './build/app/product/persistence/product.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(ProductRepository); const created = await repository.create({ sku: 'integration-sku', price: 12.5, published: true }); const found = await repository.findOne(created.id); if (found.price !== 12.5) throw new Error('persisted resource was not found'); const updated = await repository.update(created.id, { price: 20 }); if (updated.price !== 20) throw new Error('persisted resource was not updated'); await repository.create({ sku: 'integration-sku', price: 1, published: false }).then(() => { throw new Error('duplicate resource was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await repository.remove(created.id); await repository.findOne(created.id).then(() => { throw new Error('deleted resource was found'); }, (error) => { if (!(error instanceof NotFoundException)) throw error; }); } finally { await app.close(); }\n",
     );
     for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;
