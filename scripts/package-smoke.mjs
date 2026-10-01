@@ -118,6 +118,13 @@ try {
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarballPath], { cwd: consumerDirectory });
 
     const binaryPath = path.join(consumerDirectory, 'node_modules', '.bin', 'nestgen');
+    const installedPackage = JSON.parse(
+        fs.readFileSync(path.join(consumerDirectory, 'node_modules', 'nestgen-cli', 'package.json'), 'utf8'),
+    );
+    const sourcePackage = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
+    assert.equal(installedPackage.version, sourcePackage.version);
+    const version = run(process.execPath, [binaryPath, '--version'], { cwd: consumerDirectory });
+    assert.equal(version.stdout.trim(), sourcePackage.version);
     const help = run(process.execPath, [binaryPath, '--help'], { cwd: consumerDirectory });
     assert.match(help.stdout, /Usage: nestgen/);
 
