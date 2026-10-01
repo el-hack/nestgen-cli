@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { inspectProject } from './nestjs-generator/features/preflight.mjs';
 import { generateModule } from './dist/engine/module-generator.js';
 import { generateResource } from './dist/engine/resource-generator.js';
-import { parseResourceFields, parseResourceIndexes } from './dist/engine/resource-spec.js';
+import { parseResourceFields, parseResourceIndexes, parseResourceRelations } from './dist/engine/resource-spec.js';
 import { configFileName, defaultConfig, loadConfigIfPresent, writeConfig } from './dist/engine/project-config.js';
 import { parseArchitectureProfile } from './dist/engine/architecture-profile.js';
 
@@ -364,6 +364,13 @@ export function loadResourceDefinition(file, projectRoot = process.cwd()) {
     } catch (error) {
         throw new Error(`Définition de ressource invalide (${candidate}) : indexes — ${error.message}`);
     }
+    if (value.relations !== undefined && !Array.isArray(value.relations))
+        throw new Error(`Définition de ressource invalide (${candidate}) : relations doit être un tableau.`);
+    try {
+        parseResourceRelations(value.relations ?? []);
+    } catch (error) {
+        throw new Error(`Définition de ressource invalide (${candidate}) : relations — ${error.message}`);
+    }
     return value;
 }
 
@@ -380,17 +387,22 @@ async function runResourceGeneration(parsed) {
         parsed.options.indexes?.split(',').filter(Boolean) ?? definition.indexes ?? [],
         fields,
     );
+    const relations = parseResourceRelations(definition.relations ?? []);
     const route = parsed.options.route ?? definition.route ?? `${name}s`;
     const table = parsed.options.table ?? definition.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
         console.log(
-            JSON.stringify({ operation: 'resource', name, route, table, orm, profile, fields, indexes }, null, 2),
+            JSON.stringify(
+                { operation: 'resource', name, route, table, orm, profile, fields, indexes, relations },
+                null,
+                2,
+            ),
         );
         return;
     }
-    await generateResource(process.cwd(), { name, route, table, fields, indexes, orm, profile });
+    await generateResource(process.cwd(), { name, route, table, fields, indexes, relations, orm, profile });
 }
 
 function printUsage() {

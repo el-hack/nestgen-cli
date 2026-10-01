@@ -16,7 +16,13 @@ import {
 import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
 import { generateModule } from '../dist/engine/module-generator.js';
-import { parseResourceFields, parseResourceIndexes, prismaType, typescriptType } from '../dist/engine/resource-spec.js';
+import {
+    parseResourceFields,
+    parseResourceIndexes,
+    parseResourceRelations,
+    prismaType,
+    typescriptType,
+} from '../dist/engine/resource-spec.js';
 import { generateResource } from '../dist/engine/resource-generator.js';
 
 const cliPath = path.resolve('nestgen.js');
@@ -113,6 +119,21 @@ test('parses a reusable resource field contract', () => {
     assert.throws(() => parseResourceFields(['quantity:integer{min=10;max=1}']));
     assert.throws(() => parseResourceFields(['title:string{min=1}']));
     assert.throws(() => parseResourceIndexes(['missing+sku'], fields));
+    assert.deepEqual(parseResourceRelations([{ type: 'belongsTo', target: 'customer' }]), [
+        {
+            type: 'belongsTo',
+            target: 'customer',
+            field: undefined,
+            inverse: undefined,
+            nullable: false,
+            onDelete: 'RESTRICT',
+        },
+    ]);
+    assert.throws(
+        () => parseResourceRelations([{ type: 'belongsTo', target: 'customer', onDelete: 'SET NULL' }]),
+        /nullable/,
+    );
+    assert.throws(() => parseResourceRelations([{ type: 'hasMany', target: 'customer' }]), /belongsTo/);
 });
 
 test('loads a versioned resource definition and reports invalid locations', () => {
@@ -129,13 +150,62 @@ test('loads a versioned resource definition and reports invalid locations', () =
             profile: 'advanced',
             fields: ['sku:string!', 'status:enum(DRAFT|ACTIVE)'],
             indexes: ['sku+status'],
+            relations: [{ type: 'belongsTo', target: 'customer', nullable: true, onDelete: 'SET NULL' }],
         }),
     );
     assert.deepEqual(loadResourceDefinition('product.resource.json', root).indexes, ['sku+status']);
+    assert.equal(loadResourceDefinition('product.resource.json', root).relations[0].target, 'customer');
     fs.writeFileSync(definitionPath, JSON.stringify({ version: 1, fields: ['bad field'] }));
     assert.throws(() => loadResourceDefinition('product.resource.json', root), /fields\[0\]/);
     fs.writeFileSync(definitionPath, JSON.stringify({ version: 2, fields: [] }));
     assert.throws(() => loadResourceDefinition('product.resource.json', root), /version 1 requise/);
+});
+
+test('generates coherent TypeORM one-to-many relations', async () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-typeorm-relation-'));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    await generateResource(fixturePath, {
+        name: 'customer',
+        route: 'customers',
+        table: 'customers',
+        fields: parseResourceFields(['email:string!']),
+    });
+    await generateResource(fixturePath, {
+        name: 'order',
+        route: 'orders',
+        table: 'orders',
+        fields: parseResourceFields(['reference:string!']),
+        relations: parseResourceRelations([{ type: 'belongsTo', target: 'customer', onDelete: 'RESTRICT' }]),
+    });
+    const order = fs.readFileSync(path.join(fixturePath, 'src/app/order/persistence/order.entity.ts'), 'utf8');
+    const customer = fs.readFileSync(path.join(fixturePath, 'src/app/customer/persistence/customer.entity.ts'), 'utf8');
+    const restTest = fs.readFileSync(path.join(fixturePath, 'test/order.e2e-spec.ts'), 'utf8');
+    assert.match(order, /customerId!: string/);
+    assert.match(order, /@ManyToOne\(\(\) => CustomerEntity, \(customer\) => customer\.orders/);
+    assert.match(order, /onDelete: 'RESTRICT'/);
+    assert.match(order, /@JoinColumn\(\{ name: 'customerId' \}\)/);
+    assert.match(order, /@Index\('idx_orders_customerId', \['customerId'\]\)/);
+    assert.match(customer, /@OneToMany\(\(\) => OrderEntity, \(order\) => order\.customer\)/);
+    assert.match(restTest, /\.post\('\/customers'\)[\s\S]*\.send\(\{ email: 'email-value' \}\)[\s\S]*\.expect\(201\)/);
+    assert.equal((restTest.match(/const created = await api\.post/g) ?? []).length, 1);
+    assert.deepEqual(
+        JSON.parse(fs.readFileSync(path.join(fixturePath, 'src/app/order/resource.json'), 'utf8')).relations,
+        [
+            {
+                type: 'belongsTo',
+                target: 'customer',
+                field: 'customer',
+                inverse: 'orders',
+                nullable: false,
+                onDelete: 'RESTRICT',
+            },
+        ],
+    );
 });
 
 test('generates a product resource from its business fields', async () => {
@@ -502,6 +572,50 @@ test('generates a Prisma REST resource without TypeORM files', async () => {
     assert.match(schema, /@@index\(\[sku, status\], map: "idx_products_sku_status"\)/);
     assert.match(fs.readFileSync(path.join(root, 'product.controller.ts'), 'utf8'), /ParseUUIDPipe/);
     assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.repository.ts'), 'utf8'), /P2002/);
+});
+
+test('generates coherent Prisma one-to-many relations', async () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-relation-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'));
+    fs.mkdirSync(path.join(fixturePath, 'prisma'));
+    writeNestManifest(fixturePath);
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    fs.writeFileSync(
+        path.join(fixturePath, 'prisma', 'schema.prisma'),
+        'generator client { provider = "prisma-client-js" }\n\ndatasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+    await generateResource(fixturePath, {
+        name: 'customer',
+        route: 'customers',
+        table: 'customers',
+        orm: 'prisma',
+        fields: parseResourceFields(['email:string!']),
+    });
+    await generateResource(fixturePath, {
+        name: 'order',
+        route: 'orders',
+        table: 'orders',
+        orm: 'prisma',
+        fields: parseResourceFields(['reference:string!']),
+        relations: parseResourceRelations([
+            { type: 'belongsTo', target: 'customer', nullable: true, onDelete: 'SET NULL' },
+        ]),
+    });
+    const schema = fs.readFileSync(path.join(fixturePath, 'prisma/schema.prisma'), 'utf8');
+    assert.match(schema, /orders Order\[\] @relation\("CustomerOrderCustomer"\)/);
+    assert.match(schema, /customerId String\?/);
+    assert.match(
+        schema,
+        /customer Customer\? @relation\("CustomerOrderCustomer", fields: \[customerId\], references: \[id\], onDelete: SetNull\)/,
+    );
+    assert.match(schema, /@@index\(\[customerId\], map: "idx_orders_customerId"\)/);
+    assert.match(
+        fs.readFileSync(path.join(fixturePath, 'src/app/customer/persistence/customer.repository.ts'), 'utf8'),
+        /P2003/,
+    );
 });
 
 test('maps package manager operations without a global Nest CLI', () => {

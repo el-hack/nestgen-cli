@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateResource } from '../dist/engine/resource-generator.js';
-import { parseResourceFields } from '../dist/engine/resource-spec.js';
+import { parseResourceFields, parseResourceRelations } from '../dist/engine/resource-spec.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-e2e-'));
 const npmCache = path.join(root, 'npm-cache');
@@ -104,6 +104,21 @@ try {
         ]),
         indexes: [{ fields: ['sku', 'status'] }],
     });
+    await generateResource(root, {
+        name: 'customer',
+        route: 'customers',
+        table: 'customers',
+        orm: 'prisma',
+        fields: parseResourceFields(['email:string!']),
+    });
+    await generateResource(root, {
+        name: 'order',
+        route: 'orders',
+        table: 'orders',
+        orm: 'prisma',
+        fields: parseResourceFields(['reference:string!']),
+        relations: parseResourceRelations([{ type: 'belongsTo', target: 'customer', onDelete: 'RESTRICT' }]),
+    });
     run('docker', [
         'run',
         '--detach',
@@ -132,7 +147,7 @@ try {
     run('npx', ['tsc', '--noEmit']);
     fs.writeFileSync(
         path.join(root, 'persist.mjs'),
-        "import 'reflect-metadata';\nimport { ConflictException, NotFoundException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { ProductRepository } from './build/app/product/persistence/product.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(ProductRepository); const defaults = await repository.create({ sku: 'default-sku', price: 1, published: false }); if (defaults.quantity !== 0 || Number(defaults.amount) !== 0 || defaults.status !== 'DRAFT') throw new Error('database defaults were not applied'); const created = await repository.create({ sku: 'integration-sku', price: 12.5, quantity: 7, amount: '1234567890.12', status: 'DRAFT', published: true }); const found = await repository.findOne(created.id); if (found.price !== 12.5 || found.quantity !== 7 || found.amount !== '1234567890.12' || found.status !== 'DRAFT') throw new Error('persisted rich resource was not found without precision loss'); const updated = await repository.update(created.id, { price: 20, quantity: 8, amount: '9876543210.98', status: 'ACTIVE' }); if (updated.price !== 20 || updated.quantity !== 8 || updated.amount !== '9876543210.98' || updated.status !== 'ACTIVE') throw new Error('persisted rich resource was not updated'); await repository.create({ sku: 'integration-sku', price: 1, quantity: 1, amount: '1.00', status: 'DRAFT', published: false }).then(() => { throw new Error('duplicate resource was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await repository.remove(created.id); await repository.findOne(created.id).then(() => { throw new Error('deleted resource was found'); }, (error) => { if (!(error instanceof NotFoundException)) throw error; }); } finally { await app.close(); }\n",
+        "import 'reflect-metadata';\nimport { ConflictException, NotFoundException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { CustomerRepository } from './build/app/customer/persistence/customer.repository.js';\nimport { OrderRepository } from './build/app/order/persistence/order.repository.js';\nimport { ProductRepository } from './build/app/product/persistence/product.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(ProductRepository); const defaults = await repository.create({ sku: 'default-sku', price: 1, published: false }); if (defaults.quantity !== 0 || Number(defaults.amount) !== 0 || defaults.status !== 'DRAFT') throw new Error('database defaults were not applied'); const created = await repository.create({ sku: 'integration-sku', price: 12.5, quantity: 7, amount: '1234567890.12', status: 'DRAFT', published: true }); const found = await repository.findOne(created.id); if (found.price !== 12.5 || found.quantity !== 7 || found.amount !== '1234567890.12' || found.status !== 'DRAFT') throw new Error('persisted rich resource was not found without precision loss'); const updated = await repository.update(created.id, { price: 20, quantity: 8, amount: '9876543210.98', status: 'ACTIVE' }); if (updated.price !== 20 || updated.quantity !== 8 || updated.amount !== '9876543210.98' || updated.status !== 'ACTIVE') throw new Error('persisted rich resource was not updated'); await repository.create({ sku: 'integration-sku', price: 1, quantity: 1, amount: '1.00', status: 'DRAFT', published: false }).then(() => { throw new Error('duplicate resource was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await repository.remove(created.id); await repository.findOne(created.id).then(() => { throw new Error('deleted resource was found'); }, (error) => { if (!(error instanceof NotFoundException)) throw error; }); const customers = app.get(CustomerRepository); const orders = app.get(OrderRepository); const customer = await customers.create({ email: 'customer@example.test' }); await orders.create({ reference: 'missing-customer', customerId: '00000000-0000-4000-8000-000000000099' }).then(() => { throw new Error('missing foreign key was accepted'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); const order = await orders.create({ reference: 'order-1', customerId: customer.id }); if (order.customerId !== customer.id) throw new Error('foreign key was not persisted'); await customers.remove(customer.id).then(() => { throw new Error('referenced customer was deleted'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await orders.remove(order.id); await customers.remove(customer.id); } finally { await app.close(); }\n",
     );
     for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;

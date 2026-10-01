@@ -137,6 +137,17 @@ try {
             .send({ ...required, category: 'x'.repeat(33) })
             .expect(400);
     }
+    step = 'relation un-à-plusieurs';
+    const customer = await api.post('/customers').send({ email: 'customer@example.test' }).expect(201);
+    await api
+        .post('/orders')
+        .send({ reference: 'missing-customer', customerId: '00000000-0000-4000-8000-000000000099' })
+        .expect(409);
+    const order = await api.post('/orders').send({ reference: 'order-1', customerId: customer.body.id }).expect(201);
+    assert.equal(order.body.customerId, customer.body.id);
+    await api.delete('/customers/' + customer.body.id).expect(409);
+    await api.delete('/orders/' + order.body.id).expect(204);
+    await api.delete('/customers/' + customer.body.id).expect(204);
     step = 'création de la ressource';
     const created = await api
         .post('/catalog/products')

@@ -5,7 +5,7 @@ import { availableFeatureDirectory, projectPath } from './project-path.js';
 import { applyFileChanges, FileChange } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
-import { prismaType, ResourceField, ResourceIndex, typescriptType } from './resource-spec.js';
+import { prismaType, ResourceField, ResourceIndex, ResourceRelation, typescriptType } from './resource-spec.js';
 
 type Options = {
     name: string;
@@ -15,6 +15,13 @@ type Options = {
     orm?: Orm;
     profile?: ArchitectureProfile;
     indexes?: ResourceIndex[];
+    relations?: ResourceRelation[];
+};
+
+type ResolvedRelation = Required<ResourceRelation> & {
+    targetClassName: string;
+    targetFields: ResourceField[];
+    targetRoute: string;
 };
 
 function pascal(value: string): string {
@@ -22,6 +29,104 @@ function pascal(value: string): string {
         .split('-')
         .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
         .join('');
+}
+
+function camel(value: string): string {
+    const parts = value.split('-');
+    return (
+        parts[0] +
+        parts
+            .slice(1)
+            .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+            .join('')
+    );
+}
+
+function plural(value: string): string {
+    if (/[^aeiou]y$/i.test(value)) return `${value.slice(0, -1)}ies`;
+    if (/(s|x|z|ch|sh)$/i.test(value)) return `${value}es`;
+    return `${value}s`;
+}
+
+function relationField(relation: ResourceRelation): string {
+    return relation.field ?? camel(relation.target);
+}
+
+function relationIdField(relation: ResourceRelation): string {
+    return `${relationField(relation)}Id`;
+}
+
+function relationName(relation: ResolvedRelation, className: string): string {
+    return `${relation.targetClassName}${className}${pascal(relation.field)}`;
+}
+
+function resolveRelations(
+    projectRoot: string,
+    name: string,
+    orm: Orm,
+    fields: ResourceField[],
+    relations: ResourceRelation[] | undefined,
+): ResolvedRelation[] {
+    const knownFields = new Set(fields.map((field) => field.name));
+    const resolved = (relations ?? []).map((relation) => {
+        if (relation.target === name)
+            throw new Error('Une ressource ne peut pas se référencer elle-même avec belongsTo.');
+        const field = relationField(relation);
+        const idField = relationIdField(relation);
+        if (knownFields.has(idField))
+            throw new Error(`Le champ ${idField} est réservé à la relation vers ${relation.target}.`);
+        knownFields.add(idField);
+        const resourcePath = projectPath(projectRoot, `src/app/${relation.target}/resource.json`);
+        if (!fs.existsSync(resourcePath))
+            throw new Error(`La ressource cible ${relation.target} est introuvable. Générez-la avant la relation.`);
+        let target: unknown;
+        try {
+            target = JSON.parse(fs.readFileSync(resourcePath, 'utf8'));
+        } catch {
+            throw new Error(`Le manifeste de la ressource cible ${relation.target} est invalide.`);
+        }
+        if (!target || typeof target !== 'object' || (target as { orm?: unknown }).orm !== orm)
+            throw new Error(`La ressource cible ${relation.target} doit utiliser l'ORM ${orm}.`);
+        const manifest = target as { fields?: unknown; route?: unknown };
+        if (!Array.isArray(manifest.fields) || typeof manifest.route !== 'string')
+            throw new Error(`Le manifeste de la ressource cible ${relation.target} est incomplet.`);
+        return {
+            ...relation,
+            field,
+            inverse: relation.inverse ?? plural(camel(name)),
+            nullable: relation.nullable,
+            onDelete: relation.onDelete,
+            targetClassName: pascal(relation.target),
+            targetFields: manifest.fields as ResourceField[],
+            targetRoute: manifest.route,
+        };
+    });
+    if (new Set(resolved.map((relation) => relationField(relation))).size !== resolved.length)
+        throw new Error('Chaque relation doit utiliser un champ distinct.');
+    if (new Set(resolved.map((relation) => `${relation.target}:${relation.inverse}`)).size !== resolved.length)
+        throw new Error('Chaque relation vers une même ressource cible doit utiliser une propriété inverse distincte.');
+    return resolved;
+}
+
+function relationFields(relations: ResolvedRelation[]): ResourceField[] {
+    return relations.map((relation) => ({
+        name: relationIdField(relation),
+        type: 'uuid',
+        nullable: relation.nullable,
+        unique: false,
+        indexed: true,
+    }));
+}
+
+function relationManifest(relations: ResolvedRelation[]): ResourceRelation[] {
+    return relations.map(({ type, target, field, inverse, nullable, onDelete }) => ({
+        type,
+        target,
+        field,
+        inverse,
+        nullable,
+        onDelete,
+    }));
 }
 
 function enumName(className: string, field: ResourceField): string {
@@ -295,14 +400,26 @@ function generatedRestTest(
     className: string,
     fields: ResourceField[],
     route: string,
+    relations: ResolvedRelation[],
 ): { path: string; content: string } {
     const input = testInput(fields, true);
     const firstField = fields[0];
     const uniqueField = fields.find((field) => field.unique);
     const update = `${firstField.name}: ${updatedTestValue(firstField)}`;
     const invalid = `${firstField.name}: ${invalidTestValue(firstField)}`;
+    const relationSetup = [...new Map(relations.map((relation) => [relation.target, relation])).values()]
+        .map(
+            (relation) =>
+                `        const ${relation.field}Target = await api.post('/${relation.targetRoute}').send({ ${testInput(relation.targetFields, true)} }).expect(201);\n${relations
+                    .filter((candidate) => candidate.target === relation.target)
+                    .map(
+                        (candidate) => `        input.${relationIdField(candidate)} = ${relation.field}Target.body.id;`,
+                    )
+                    .join('\n')}`,
+        )
+        .join('\n');
     const duplicateTest = uniqueField
-        ? `\n    it('returns 409 when a unique value already exists', async () => {\n        await api.post('/${route}').send(input).expect(201);\n        await api.post('/${route}').send(input).expect(409);\n    });\n`
+        ? `\n    it('returns 409 when a unique value already exists', async () => {\n${relationSetup ? `${relationSetup}\n` : ''}        await api.post('/${route}').send(input).expect(201);\n        await api.post('/${route}').send(input).expect(409);\n    });\n`
         : '';
     return {
         path: `test/${name}.e2e-spec.ts`,
@@ -327,7 +444,7 @@ describe('${className} REST', () => {
     let app: INestApplication;
     let database: DataSource;
     let api: ReturnType<typeof request>;
-    const input = { ${input} };
+    const input: Record<string, unknown> = { ${input} };
 
     beforeAll(async () => {
         const { AppModule } = await import('../src/app.module.js');
@@ -352,7 +469,7 @@ describe('${className} REST', () => {
     });
 
     it('creates, reads, partially updates, paginates and deletes a resource', async () => {
-        const created = await api.post('/${route}').send(input).expect(201);
+${relationSetup ? `${relationSetup}\n` : ''}        const created = await api.post('/${route}').send(input).expect(201);
         expect(created.body).toEqual(expect.objectContaining(input));
 
         const found = await api.get('/${route}/' + created.body.id).expect(200);
@@ -406,12 +523,38 @@ function prismaModelFields(className: string, fields: ResourceField[]): string {
         .join('\n');
 }
 
+function updatePrismaModel(source: string, className: string, property: string, propertyName: string): string {
+    const model = new RegExp(`(model\\s+${className}\\s*\\{)([\\s\\S]*?)(\\n\\})`);
+    const match = model.exec(source);
+    if (!match) throw new Error(`Le modèle Prisma cible ${className} est introuvable.`);
+    if (new RegExp(`\\b${propertyName}\\b`).test(match[2]))
+        throw new Error(`La propriété Prisma ${propertyName} existe déjà sur ${className}.`);
+    const insertion = match[2].includes('\n  @@')
+        ? match[2].replace(/\n(  @@)/, `\n  ${property}\n\n$1`)
+        : `${match[2]}\n  ${property}`;
+    return `${source.slice(0, match.index)}${match[1]}${insertion}${match[3]}${source.slice(match.index + match[0].length)}`;
+}
+
+function addPrismaInverseRelations(source: string, className: string, relations: ResolvedRelation[]): string {
+    return relations.reduce(
+        (current, relation) =>
+            updatePrismaModel(
+                current,
+                relation.targetClassName,
+                `${relation.inverse} ${className}[] @relation("${relationName(relation, className)}")`,
+                relation.inverse,
+            ),
+        source,
+    );
+}
+
 function prismaSchema(
     source: string,
     className: string,
     table: string,
     fields: ResourceField[],
     indexes: ResourceIndex[],
+    relations: ResolvedRelation[],
 ): string {
     if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
         throw new Error(`Le modèle Prisma ${className} existe déjà.`);
@@ -425,7 +568,14 @@ function prismaSchema(
     const indexDefinitions = indexes
         .map((index) => `  @@index([${index.fields.join(', ')}], map: "${indexName(table, index.fields)}")`)
         .join('\n');
-    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
+    const withInverses = addPrismaInverseRelations(source, className, relations);
+    const relationProperties = relations
+        .map(
+            (relation) =>
+                `  ${relation.field} ${relation.targetClassName}${relation.nullable ? '?' : ''} @relation("${relationName(relation, className)}", fields: [${relationIdField(relation)}], references: [id], onDelete: ${relation.onDelete === 'SET NULL' ? 'SetNull' : 'Restrict'})`,
+        )
+        .join('\n');
+    return `${withInverses.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${relationProperties ? `\n${relationProperties}` : ''}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
 }
 
 function prismaRuntime(projectRoot: string): FileChange[] {
@@ -447,6 +597,62 @@ function prismaRuntime(projectRoot: string): FileChange[] {
                 "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service.js';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
         },
     ];
+}
+
+function addTypeOrmInverseRelations(
+    projectRoot: string,
+    name: string,
+    className: string,
+    relations: ResolvedRelation[],
+): FileChange[] {
+    const byTarget = new Map<string, ResolvedRelation[]>();
+    for (const relation of relations) {
+        const group = byTarget.get(relation.target) ?? [];
+        group.push(relation);
+        byTarget.set(relation.target, group);
+    }
+    return [...byTarget.entries()].map(([target, targetRelations]) => {
+        const relative = `src/app/${target}/persistence/${target}.entity.ts`;
+        const source = fs.readFileSync(projectPath(projectRoot, relative), 'utf8');
+        const decoratorImport = /import \{ ([^}]+) \} from 'typeorm';/;
+        const importMatch = decoratorImport.exec(source);
+        if (!importMatch)
+            throw new Error(
+                `L'entité cible ${targetRelations[0].targetClassName}Entity utilise un import TypeORM non supporté.`,
+            );
+        const decorators = new Set(importMatch[1].split(',').map((item) => item.trim()));
+        decorators.add('OneToMany');
+        const decoratorNames = [...decorators].sort();
+        const decoratorStatement = `import { ${decoratorNames.join(', ')} } from 'typeorm';`;
+        const decoratorReplacement =
+            decoratorStatement.length <= 80
+                ? decoratorStatement
+                : `import {\n${decoratorNames.map((decorator) => `  ${decorator},`).join('\n')}\n} from 'typeorm';`;
+        const withDecorator = source.replace(decoratorImport, decoratorReplacement);
+        const childImport = `import { ${className}Entity } from '../../${name}/persistence/${name}.entity.js';\n`;
+        if (withDecorator.includes(childImport))
+            throw new Error(
+                `L'entité cible ${targetRelations[0].targetClassName}Entity référence déjà ${className}Entity.`,
+            );
+        const withImport = withDecorator.replace(/\n\n/, `\n${childImport}\n`);
+        const indentation = /\n(\s+)@PrimaryGeneratedColumn/.exec(withImport)?.[1] ?? '    ';
+        const property = `\n\n${targetRelations
+            .map((relation) => {
+                if (new RegExp(`\\b${relation.inverse}\\b`).test(source))
+                    throw new Error(
+                        `La propriété ${relation.inverse} existe déjà sur ${relation.targetClassName}Entity.`,
+                    );
+                return `${indentation}@OneToMany(() => ${className}Entity, (${camel(name)}) => ${camel(name)}.${relation.field})\n${indentation}${relation.inverse}!: ${className}Entity[];`;
+            })
+            .join('\n\n')}`;
+        const end = withImport.lastIndexOf('\n}');
+        if (end === -1) throw new Error(`L'entité cible ${targetRelations[0].targetClassName}Entity est invalide.`);
+        return {
+            path: relative,
+            content: `${withImport.slice(0, end)}${property}${withImport.slice(end)}`,
+            operation: 'replace' as const,
+        };
+    });
 }
 
 function prismaResourceFiles(
@@ -487,7 +693,7 @@ function prismaResourceFiles(
     );
     files.set(
         `persistence/${name}.repository.ts`,
-        `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`,
+        `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') throw new ConflictException('Cette ressource est référencée par une autre ressource.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`,
     );
     files.set(
         `${name}.controller.ts`,
@@ -529,9 +735,22 @@ function featureFiles(
     profile: ArchitectureProfile,
     swagger: boolean,
     indexes: ResourceIndex[],
+    relations: ResolvedRelation[],
 ): Map<string, string> {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
+    const relationImports = relations
+        .map(
+            (relation) =>
+                `import { ${relation.targetClassName}Entity } from '../../${relation.target}/persistence/${relation.target}.entity.js';`,
+        )
+        .join('\n');
+    const relationProperties = relations
+        .map(
+            (relation) =>
+                `    @ManyToOne(() => ${relation.targetClassName}Entity, (${relation.field}) => ${relation.field}.${relation.inverse}, { nullable: ${relation.nullable}, onDelete: '${relation.onDelete}' })\n    @JoinColumn({ name: '${relationIdField(relation)}' })\n    ${relation.field}${relation.nullable ? '?' : '!'}: Relation<${relation.targetClassName}Entity>${relation.nullable ? ' | null' : ''};`,
+        )
+        .join('\n\n');
     const entityIndexes = indexes
         .map(
             (index) =>
@@ -558,7 +777,7 @@ function featureFiles(
     );
     files.set(
         'persistence/' + name + '.entity.ts',
-        `import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';\n\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`,
+        `import { Column, Entity${indexes.length ? ', Index' : ''}${relations.length ? ', JoinColumn, ManyToOne, type Relation' : ''}, PrimaryGeneratedColumn } from 'typeorm';\n${relationImports ? `${relationImports}\n` : ''}\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}${relationProperties ? `\n\n${relationProperties}` : ''}\n}\n`,
     );
     if (swagger) {
         const queryPath = 'dto/list-' + name + '.query.ts';
@@ -588,9 +807,12 @@ function featureFiles(
     const conflictError = advanced
         ? `new ${className}ConflictError('Une ressource avec cette valeur unique existe déjà.')`
         : `new ConflictException('Une ressource avec cette valeur unique existe déjà.')`;
+    const foreignKeyConflictError = advanced
+        ? `new ${className}ConflictError('Cette ressource est référencée par une autre ressource.')`
+        : `new ConflictException('Cette ressource est référencée par une autre ressource.')`;
     files.set(
         'persistence/' + name + '.repository.ts',
-        `${persistenceImports}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: ${persistenceInputTypes}): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw ${missingError};\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: ${persistenceUpdateTypes}): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw ${missingError};\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        const result = await this.repository.delete(id);\n        if (!result.affected) throw ${missingError};\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw ${conflictError};\n        throw error;\n    }\n}\n`,
+        `${persistenceImports}import { ${className}Entity } from './${name}.entity.js';\n\n@Injectable()\nexport class ${className}Repository${advanced ? ` implements ${className}RepositoryPort` : ''} {\n    constructor(@InjectRepository(${className}Entity) private readonly repository: Repository<${className}Entity>) {}\n\n    async create(input: ${persistenceInputTypes}): Promise<${className}> {\n        try {\n            return this.toDomain(await this.repository.save(this.repository.create({ ${fieldAssignments} })));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async findOne(id: string): Promise<${className}> {\n        const value = await this.repository.findOneBy({ id });\n        if (!value) throw ${missingError};\n        return this.toDomain(value);\n    }\n\n    async findMany(skip: number, take: number): Promise<${className}[]> {\n        return (await this.repository.find({ skip, take, order: { id: 'ASC' } })).map((value) => this.toDomain(value));\n    }\n\n    async update(id: string, input: ${persistenceUpdateTypes}): Promise<${className}> {\n        const existing = await this.repository.preload({ id, ${fieldAssignments} });\n        if (!existing) throw ${missingError};\n        try {\n            return this.toDomain(await this.repository.save(existing));\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    async remove(id: string): Promise<void> {\n        try {\n            const result = await this.repository.delete(id);\n            if (!result.affected) throw ${missingError};\n        } catch (error) {\n            this.rethrowPersistenceError(error);\n        }\n    }\n\n    private toDomain(value: ${className}Entity): ${className} {\n        return Object.assign(new ${className}(), value);\n    }\n\n    private rethrowPersistenceError(error: unknown): never {\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23505')\n            throw ${conflictError};\n        if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23503')\n            throw ${foreignKeyConflictError};\n        throw error;\n    }\n}\n`,
     );
     if (advanced) {
         const contract = applicationContract(name, className, fields);
@@ -676,14 +898,16 @@ export async function generateResource(projectRoot: string, options: Options): P
     const name = options.name.trim().toLowerCase().replaceAll('_', '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) throw new Error('Nom de ressource invalide.');
     const className = pascal(name);
-    const indexes = resolvedIndexes(options.fields, options.indexes);
     const project = inspectProject(projectRoot, orm, { cqrs: false });
     projectRoot = project.root;
     availableFeatureDirectory(projectRoot, name);
     const appModulePath = project.appModulePath;
+    const relations = resolveRelations(projectRoot, name, orm, options.fields, options.relations);
+    const fields = [...options.fields, ...relationFields(relations)];
+    const indexes = resolvedIndexes(fields, options.indexes);
 
     if (orm === 'prisma') {
-        const files = prismaResourceFiles(name, className, options.fields, options.route);
+        const files = prismaResourceFiles(name, className, fields, options.route);
         const appModule = registerModuleInAppModule(
             fs.readFileSync(appModulePath, 'utf8'),
             `${className}Module`,
@@ -702,15 +926,16 @@ export async function generateResource(projectRoot: string, options: Options): P
                 fs.readFileSync(schemaPath, 'utf8'),
                 className,
                 options.table,
-                options.fields,
+                fields,
                 indexes,
+                relations,
             ),
             operation: 'replace',
         });
         changes.push(...prismaRuntime(projectRoot));
         changes.push({
             path: `src/app/${name}/resource.json`,
-            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
+            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes, relations: relationManifest(relations) }, null, 2)}\n`,
             operation: 'create',
         });
         changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
@@ -727,14 +952,15 @@ export async function generateResource(projectRoot: string, options: Options): P
     const files = featureFiles(
         name,
         className,
-        options.fields,
+        fields,
         options.route,
         options.table,
         profile,
         swagger,
         indexes,
+        relations,
     );
-    const restTest = generatedRestTest(name, className, options.fields, options.route);
+    const restTest = generatedRestTest(name, className, fields, options.route, relations);
     const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(
         fs.readFileSync(appModulePath, 'utf8'),
@@ -749,9 +975,10 @@ export async function generateResource(projectRoot: string, options: Options): P
     }));
     changes.push({ path: restTest.path, content: restTest.content, operation: 'create' });
     changes.push(...[...e2eSupport].map(([file, content]) => ({ path: file, content, operation: 'create' as const })));
+    changes.push(...addTypeOrmInverseRelations(projectRoot, name, className, relations));
     changes.push({
         path: `src/app/${name}/resource.json`,
-        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
+        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes, relations: relationManifest(relations) }, null, 2)}\n`,
         operation: 'create',
     });
     changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
