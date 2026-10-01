@@ -156,6 +156,8 @@ Ajoutez `list` à la définition pour autoriser explicitement les filtres et tri
 
 Les opérateurs autorisés dépendent du type : `eq` et `neq` pour tous les champs, `contains` pour les chaînes, et `gt`, `gte`, `lt`, `lte` pour les nombres, entiers, décimaux et dates. Une requête telle que `GET /products?skuContains=pro&priceGte=10&sort=price:desc` combine les filtres, applique un ordre déterministe (avec `id` comme brise-égalité) et respecte `page` et `limit`. `q` recherche sur les champs déclarés dans `search`.
 
+Ajoutez `"cursor": true` dans `list` pour inclure `nextCursor` dans les réponses. Reprenez la liste avec `?after=<nextCursor>` : le curseur opaque est validé et suit l’ordre stable `id:asc`, après application des mêmes filtres et de la même recherche. Un tri métier ne produit donc pas de curseur et ne peut pas être combiné avec `after`; ce choix évite les doublons ou omissions lors de la progression. Les changements concurrents peuvent toujours modifier les données restantes entre deux requêtes, comme avec toute pagination sans snapshot transactionnel.
+
 ## Relations entre ressources
 
 Une relation est déclarée dans le fichier de définition de la ressource enfant. La ressource cible doit déjà avoir été générée avec le même ORM. `belongsTo` crée la clé étrangère, un index et la propriété inverse sur la cible pour former une relation un-à-plusieurs cohérente.

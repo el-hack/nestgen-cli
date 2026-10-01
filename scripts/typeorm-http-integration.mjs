@@ -169,6 +169,7 @@ try {
         indexes: [{ fields: ['sku', 'status'] }],
         profile: 'simple',
         list: {
+            cursor: true,
             filters: { sku: ['eq', 'contains'], price: ['gte', 'lt'] },
             search: ['sku'],
             sort: ['sku', 'price'],

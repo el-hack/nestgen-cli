@@ -204,6 +204,26 @@ try {
     await api.get('/simple-products?unknown=value').expect(400);
     await api.get('/simple-products?sort=price:sideways').expect(400);
     await api.get('/simple-products?sort=price:desc:extra').expect(400);
+    await api
+        .post('/simple-products')
+        .send({ sku: 'cursor-one', price: 21, amount: '1.00', status: 'DRAFT', published: false })
+        .expect(201);
+    await api
+        .post('/simple-products')
+        .send({ sku: 'cursor-two', price: 22, amount: '1.00', status: 'DRAFT', published: false })
+        .expect(201);
+    const firstCursorPage = await api.get('/simple-products?skuContains=cursor&limit=1').expect(200);
+    assert.equal(firstCursorPage.body.data.length, 1);
+    assert.equal(typeof firstCursorPage.body.nextCursor, 'string');
+    const secondCursorPage = await api
+        .get(`/simple-products?skuContains=cursor&limit=1&after=${encodeURIComponent(firstCursorPage.body.nextCursor)}`)
+        .expect(200);
+    assert.equal(secondCursorPage.body.data.length, 1);
+    assert.notEqual(secondCursorPage.body.data[0].id, firstCursorPage.body.data[0].id);
+    await api.get('/simple-products?after=invalid-cursor').expect(400);
+    await api
+        .get(`/simple-products?after=${encodeURIComponent(firstCursorPage.body.nextCursor)}&sort=price:desc`)
+        .expect(400);
     step = 'mise à jour';
     await api
         .patch('/catalog/products/' + created.body.id)

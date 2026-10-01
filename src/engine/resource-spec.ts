@@ -32,6 +32,7 @@ export type ResourceRelation = {
 export type ResourceFilterOperator = 'eq' | 'neq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte';
 
 export type ResourceListOptions = {
+    cursor: boolean;
     filters: Record<string, ResourceFilterOperator[]>;
     sort: string[];
     search: string[];
@@ -272,11 +273,13 @@ const filterOperatorsByType: Record<ScalarType, ReadonlySet<ResourceFilterOperat
 };
 
 export function parseResourceListOptions(value: unknown, fields: ResourceField[]): ResourceListOptions {
-    if (value === undefined) return { filters: {}, sort: [], search: [] };
+    if (value === undefined) return { cursor: false, filters: {}, sort: [], search: [] };
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('list doit être un objet.');
     const list = value as Record<string, unknown>;
-    if (Object.keys(list).some((key) => !['filters', 'sort', 'search'].includes(key)))
+    if (Object.keys(list).some((key) => !['cursor', 'filters', 'sort', 'search'].includes(key)))
         throw new Error('list contient une propriété inconnue.');
+    if (list.cursor !== undefined && typeof list.cursor !== 'boolean')
+        throw new Error('list.cursor doit être un booléen.');
     const knownFields = new Map(fields.map((field) => [field.name, field]));
     const filtersRaw = list.filters ?? {};
     if (!filtersRaw || typeof filtersRaw !== 'object' || Array.isArray(filtersRaw))
@@ -310,6 +313,7 @@ export function parseResourceListOptions(value: unknown, fields: ResourceField[]
         return values;
     };
     return {
+        cursor: list.cursor ?? false,
         filters,
         sort: parseFieldList('sort', () => true),
         search: parseFieldList('search', (field) => field.type === 'string'),
