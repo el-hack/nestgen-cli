@@ -50,6 +50,7 @@ jobs:
                   cache: npm
             - run: npm ci
             - run: npm run test:docker
+            - run: npm run test:example
             - run: npm run test:prisma
             - run: npm run test:typeorm
             - run: npm run test:package

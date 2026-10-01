@@ -93,6 +93,10 @@ A duplicate `sku` returns HTTP `409`; a malformed `price` returns HTTP `400`; an
 
 Install `nestgen-cli`, run `nestgen init`, choose **npm**, **typeorm** and Docker, then run the same commands above. `resource product --fields sku:string!,price:number,published:boolean` creates the TypeORM CRUD. Start PostgreSQL with `docker compose up -d postgres`, generate and run the migration through `typeorm-ts-node-commonjs`, start NestJS, then use the two `curl` commands to verify create and list operations.
 
+## Maintained Store API example
+
+The published package includes a version-pinned [Store API example](examples/store-api/README.md) with customers, products, orders and order items. Its resource definitions are rebuilt by the CLI in CI, including relation constraints and a migration plan, so the guide stays aligned with the distributed generator. Use it when you need a complete multi-resource starting point rather than the single-product quickstart.
+
 ## Commands
 
 ```text
@@ -311,6 +315,7 @@ npm test
 npm run test:docker
 npm run test:prisma
 npm run test:typeorm
+npm run test:example
 npm run test:package
 ```
 

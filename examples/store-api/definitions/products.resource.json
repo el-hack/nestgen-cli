@@ -1,0 +1,19 @@
+{
+    "version": 1,
+    "name": "product",
+    "route": "products",
+    "table": "products",
+    "orm": "typeorm",
+    "profile": "advanced",
+    "fields": [
+        "sku:string{length=64}!",
+        "name:string{length=160}",
+        "unitPrice:decimal(12;2)",
+        "stock:integer{min=0;default=0}"
+    ],
+    "list": {
+        "filters": { "sku": ["eq", "contains"], "stock": ["gte", "lt"] },
+        "search": ["sku", "name"],
+        "sort": ["sku", "unitPrice", "stock"]
+    }
+}

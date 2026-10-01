@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "name": "order",
+    "route": "orders",
+    "table": "orders",
+    "orm": "typeorm",
+    "profile": "advanced",
+    "fields": ["reference:string{length=64}!", "status:enum(DRAFT|PLACED|CANCELLED){default=DRAFT}"],
+    "relations": [
+        {
+            "type": "belongsTo",
+            "target": "customer",
+            "field": "customer",
+            "inverse": "orders",
+            "onDelete": "RESTRICT"
+        }
+    ],
+    "list": {
+        "filters": { "status": ["eq"] },
+        "sort": ["reference", "status"]
+    }
+}
