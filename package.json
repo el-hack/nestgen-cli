@@ -38,6 +38,7 @@
         "prepack": "npm run build && npm run check && npm run format:check && npm test",
         "test": "node --test",
         "test:package": "node scripts/package-smoke.mjs",
+        "test:package-manager": "node scripts/package-manager-lockfile-integration.mjs",
         "test:prisma": "node scripts/prisma-integration.mjs",
         "test:docker": "node scripts/docker-config-integration.mjs",
         "test:typeorm": "node scripts/typeorm-http-integration.mjs",
