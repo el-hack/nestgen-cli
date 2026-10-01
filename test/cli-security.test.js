@@ -72,16 +72,37 @@ function assertOrmOutput(root, orm) {
 }
 
 test('parses a reusable resource field contract', () => {
-    const fields = parseResourceFields(['sku:string!', 'price:number', 'available:boolean', 'expiresAt:date?']);
+    const fields = parseResourceFields([
+        'sku:string!',
+        'price:number',
+        'quantity:integer',
+        'amount:decimal(12;2)',
+        'status:enum(DRAFT|ACTIVE)',
+        'available:boolean',
+        'expiresAt:date?',
+    ]);
     assert.deepEqual(
         fields.map((field) => field.name),
-        ['sku', 'price', 'available', 'expiresAt'],
+        ['sku', 'price', 'quantity', 'amount', 'status', 'available', 'expiresAt'],
     );
     assert.equal(typescriptType(fields[1]), 'number');
+    assert.equal(typescriptType(fields[2]), 'number');
+    assert.equal(typescriptType(fields[3]), 'string');
+    assert.deepEqual(fields[3], {
+        name: 'amount',
+        type: 'decimal',
+        nullable: false,
+        unique: false,
+        precision: 12,
+        scale: 2,
+    });
+    assert.deepEqual(fields[4].enumValues, ['DRAFT', 'ACTIVE']);
     assert.equal(prismaType(fields[0]), 'String @unique');
-    assert.equal(prismaType(fields[3]), 'DateTime?');
+    assert.equal(prismaType(fields[6]), 'DateTime?');
     assert.throws(() => parseResourceFields(['id:uuid']));
     assert.throws(() => parseResourceFields(['price:number', 'price:string']));
+    assert.throws(() => parseResourceFields(['amount:decimal(2;3)']));
+    assert.throws(() => parseResourceFields(['status:enum(draft|ACTIVE)']));
 });
 
 test('generates a product resource from its business fields', async () => {
@@ -92,7 +113,15 @@ test('generates a product resource from its business fields', async () => {
         path.join(fixturePath, 'src', 'app.module.ts'),
         "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
     );
-    const fields = parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']);
+    const fields = parseResourceFields([
+        'sku:string!',
+        'price:number',
+        'quantity:integer',
+        'amount:decimal(12;2)',
+        'status:enum(DRAFT|ACTIVE)',
+        'published:boolean',
+        'releasedAt:date?',
+    ]);
     await generateResource(fixturePath, {
         name: 'product',
         route: 'catalog/products',
@@ -101,6 +130,14 @@ test('generates a product resource from its business fields', async () => {
     });
     const root = path.join(fixturePath, 'src', 'app', 'product');
     assert.match(fs.readFileSync(path.join(root, 'domain', 'product.ts'), 'utf8'), /price!?: number/);
+    const entity = fs.readFileSync(path.join(root, 'persistence', 'product.entity.ts'), 'utf8');
+    const dto = fs.readFileSync(path.join(root, 'dto', 'create-product.dto.ts'), 'utf8');
+    assert.match(entity, /type: 'integer'/);
+    assert.match(entity, /type: 'numeric'.*precision: 12, scale: 2/s);
+    assert.match(entity, /enum: \['DRAFT', 'ACTIVE'\]/);
+    assert.match(dto, /@IsInt\(\)/);
+    assert.match(dto, /@IsDecimal\(\{ decimal_digits: '1,2'/);
+    assert.match(dto, /@IsIn\(\['DRAFT', 'ACTIVE'\]\)/);
     assertOrmOutput(root, 'typeorm');
     assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.entity.ts'), 'utf8'), /catalog_products/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'resource.json'), 'utf8')).orm, 'typeorm');
@@ -394,11 +431,23 @@ test('generates a Prisma REST resource without TypeORM files', async () => {
         route: 'products',
         table: 'products',
         orm: 'prisma',
-        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean']),
+        fields: parseResourceFields([
+            'sku:string!',
+            'price:number',
+            'quantity:integer',
+            'amount:decimal(12;2)',
+            'status:enum(DRAFT|ACTIVE)',
+            'published:boolean',
+        ]),
     });
     const root = path.join(fixturePath, 'src', 'app', 'product');
     assertOrmOutput(root, 'prisma');
     assert.match(fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8'), /sku String @unique/);
+    const schema = fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8');
+    assert.match(schema, /quantity Int/);
+    assert.match(schema, /amount Decimal @db\.Decimal\(12, 2\)/);
+    assert.match(schema, /enum ProductStatus \{\n  DRAFT\n  ACTIVE\n\}/);
+    assert.match(schema, /status ProductStatus/);
     assert.match(fs.readFileSync(path.join(root, 'product.controller.ts'), 'utf8'), /ParseUUIDPipe/);
     assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.repository.ts'), 'utf8'), /P2002/);
 });

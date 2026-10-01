@@ -23,18 +23,35 @@ function pascal(value: string): string {
         .join('');
 }
 
-function entityColumn(field: ResourceField): string {
+function enumName(className: string, field: ResourceField): string {
+    return `${className}${pascal(field.name)}`;
+}
+
+function enumValues(field: ResourceField): string {
+    return field.enumValues!.map((value) => `'${value}'`).join(', ');
+}
+
+function entityColumn(field: ResourceField, className: string): string {
     const type =
         field.type === 'number'
             ? "'double precision'"
-            : field.type === 'boolean'
-              ? "'boolean'"
-              : field.type === 'date'
-                ? "'timestamptz'"
-                : field.type === 'uuid'
-                  ? "'uuid'"
-                  : "'varchar'";
+            : field.type === 'integer'
+              ? "'integer'"
+              : field.type === 'decimal'
+                ? "'numeric'"
+                : field.type === 'enum'
+                  ? "'enum'"
+                  : field.type === 'boolean'
+                    ? "'boolean'"
+                    : field.type === 'date'
+                      ? "'timestamptz'"
+                      : field.type === 'uuid'
+                        ? "'uuid'"
+                        : "'varchar'";
     const options = [`type: ${type}`, `nullable: ${field.nullable}`];
+    if (field.type === 'decimal') options.push(`precision: ${field.precision}`, `scale: ${field.scale}`);
+    if (field.type === 'enum')
+        options.push(`enum: [${enumValues(field)}]`, `enumName: '${enumName(className, field)}'`);
     if (field.unique) options.push('unique: true');
     return `    @Column({ ${options.join(', ')} })\n    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`;
 }
@@ -48,19 +65,29 @@ function validationDecorators(field: ResourceField, optional: boolean): string[]
     decorators.push(
         field.type === 'number'
             ? '@IsNumber()'
-            : field.type === 'boolean'
-              ? '@IsBoolean()'
-              : field.type === 'date'
-                ? '@IsDateString()'
-                : field.type === 'uuid'
-                  ? '@IsUUID()'
-                  : '@IsString()',
+            : field.type === 'integer'
+              ? '@IsInt()'
+              : field.type === 'decimal'
+                ? `@IsDecimal({ decimal_digits: '1,${field.scale}', force_decimal: false })`
+                : field.type === 'enum'
+                  ? `@IsIn([${enumValues(field)}])`
+                  : field.type === 'boolean'
+                    ? '@IsBoolean()'
+                    : field.type === 'date'
+                      ? '@IsDateString()'
+                      : field.type === 'uuid'
+                        ? '@IsUUID()'
+                        : '@IsString()',
     );
     return decorators;
 }
 
 function swaggerType(field: ResourceField): string {
-    return field.type === 'number' ? 'Number' : field.type === 'boolean' ? 'Boolean' : 'String';
+    return field.type === 'number' || field.type === 'integer'
+        ? 'Number'
+        : field.type === 'boolean'
+          ? 'Boolean'
+          : 'String';
 }
 
 function swaggerProperty(field: ResourceField, optional: boolean): string {
@@ -69,6 +96,13 @@ function swaggerProperty(field: ResourceField, optional: boolean): string {
     if (field.nullable) options.push('nullable: true');
     if (field.type === 'date') options.push("format: 'date-time'");
     if (field.type === 'uuid') options.push("format: 'uuid'");
+    if (field.type === 'integer') options.push("format: 'int32'");
+    if (field.type === 'decimal')
+        options.push(
+            "format: 'decimal'",
+            "description: 'Nombre décimal transmis sous forme de chaîne pour préserver sa précision.'",
+        );
+    if (field.type === 'enum') options.push(`enum: [${enumValues(field)}]`);
     if (field.unique) options.push("description: 'Valeur unique.'");
     return `@${required ? 'ApiProperty' : 'ApiPropertyOptional'}({ ${options.join(', ')} })`;
 }
@@ -152,6 +186,9 @@ function applicationContract(
 
 function sampleValue(field: ResourceField, transport: boolean): string {
     if (field.type === 'number') return '42';
+    if (field.type === 'integer') return '42';
+    if (field.type === 'decimal') return `'123${field.scale ? `.${'4'.repeat(field.scale)}` : ''}'`;
+    if (field.type === 'enum') return `'${field.enumValues![0]}'`;
     if (field.type === 'boolean') return 'true';
     if (field.type === 'date') return transport ? "'2026-01-02T03:04:05.000Z'" : "new Date('2026-01-02T03:04:05.000Z')";
     if (field.type === 'uuid') return "'00000000-0000-4000-8000-000000000123'";
@@ -184,6 +221,9 @@ function generatedUnitTest(
 
 function updatedTestValue(field: ResourceField): string {
     if (field.type === 'number') return '84';
+    if (field.type === 'integer') return '84';
+    if (field.type === 'decimal') return `'456${field.scale ? `.${'5'.repeat(field.scale)}` : ''}'`;
+    if (field.type === 'enum') return `'${field.enumValues![1] ?? field.enumValues![0]}'`;
     if (field.type === 'boolean') return 'false';
     if (field.type === 'date') return "'2026-02-03T04:05:06.000Z'";
     if (field.type === 'uuid') return "'00000000-0000-4000-8000-000000000456'";
@@ -192,6 +232,9 @@ function updatedTestValue(field: ResourceField): string {
 
 function invalidTestValue(field: ResourceField): string {
     if (field.type === 'number') return "'invalid-number'";
+    if (field.type === 'integer') return "'invalid-integer'";
+    if (field.type === 'decimal') return "'invalid-decimal'";
+    if (field.type === 'enum') return "'INVALID_ENUM_VALUE'";
     if (field.type === 'boolean') return "'invalid-boolean'";
     if (field.type === 'date') return "'invalid-date'";
     if (field.type === 'uuid') return "'invalid-uuid'";
@@ -302,14 +345,29 @@ function e2eSupportFiles(projectRoot: string): Map<string, string> {
     return files;
 }
 
-function prismaModelFields(fields: ResourceField[]): string {
-    return fields.map((field) => `  ${field.name} ${prismaType(field)}`).join('\n');
+function prismaModelFields(className: string, fields: ResourceField[]): string {
+    return fields
+        .map((field) => {
+            if (field.type === 'enum')
+                return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}`;
+            if (field.type === 'decimal')
+                return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}`;
+            return `  ${field.name} ${prismaType(field)}`;
+        })
+        .join('\n');
 }
 
 function prismaSchema(source: string, className: string, table: string, fields: ResourceField[]): string {
     if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
         throw new Error(`Le modèle Prisma ${className} existe déjà.`);
-    return `${source.trimEnd()}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(fields)}\n\n  @@map("${table}")\n}\n`;
+    const definitions = fields
+        .filter((field) => field.type === 'enum')
+        .map((field) => {
+            const name = enumName(className, field);
+            if (new RegExp(`\\benum\\s+${name}\\b`).test(source)) throw new Error(`L'enum Prisma ${name} existe déjà.`);
+            return `enum ${name} {\n${field.enumValues!.map((value) => `  ${value}`).join('\n')}\n}`;
+        });
+    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}\n\n  @@map("${table}")\n}\n`;
 }
 
 function prismaRuntime(projectRoot: string): FileChange[] {
@@ -352,6 +410,10 @@ function prismaResourceFiles(
                 `...((input as Record<string, unknown>).${field.name} === undefined ? {} : { ${field.name}${field.type === 'date' ? `: (input as Record<string, unknown>).${field.name} === null ? null : new Date((input as Record<string, unknown>).${field.name} as string)` : `: (input as Record<string, unknown>).${field.name}`} })`,
         )
         .join(', ');
+    const decimalMapping = fields
+        .filter((field) => field.type === 'decimal')
+        .map((field) => `${field.name}: value.${field.name} === null ? null : String(value.${field.name})`)
+        .join(', ');
     files.set(`domain/${name}.ts`, `export class ${className} {\n    id!: string;\n${properties}\n}\n`);
     files.set(
         `dto/create-${name}.dto.ts`,
@@ -367,7 +429,7 @@ function prismaResourceFiles(
     );
     files.set(
         `persistence/${name}.repository.ts`,
-        `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}): ${className} { return Object.assign(new ${className}(), value); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`,
+        `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`,
     );
     files.set(
         `${name}.controller.ts`,
@@ -410,7 +472,7 @@ function featureFiles(
     swagger: boolean,
 ): Map<string, string> {
     const advanced = profile === 'advanced';
-    const entityProperties = fields.map(entityColumn).join('\n\n');
+    const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
     const fieldAssignments = propertyMap(fields);
     const domainProperties = fields
         .map((field) => `    ${field.name}!: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)

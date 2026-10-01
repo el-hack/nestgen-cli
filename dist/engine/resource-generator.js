@@ -12,17 +12,33 @@ function pascal(value) {
         .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
         .join('');
 }
-function entityColumn(field) {
+function enumName(className, field) {
+    return `${className}${pascal(field.name)}`;
+}
+function enumValues(field) {
+    return field.enumValues.map((value) => `'${value}'`).join(', ');
+}
+function entityColumn(field, className) {
     const type = field.type === 'number'
         ? "'double precision'"
-        : field.type === 'boolean'
-            ? "'boolean'"
-            : field.type === 'date'
-                ? "'timestamptz'"
-                : field.type === 'uuid'
-                    ? "'uuid'"
-                    : "'varchar'";
+        : field.type === 'integer'
+            ? "'integer'"
+            : field.type === 'decimal'
+                ? "'numeric'"
+                : field.type === 'enum'
+                    ? "'enum'"
+                    : field.type === 'boolean'
+                        ? "'boolean'"
+                        : field.type === 'date'
+                            ? "'timestamptz'"
+                            : field.type === 'uuid'
+                                ? "'uuid'"
+                                : "'varchar'";
     const options = [`type: ${type}`, `nullable: ${field.nullable}`];
+    if (field.type === 'decimal')
+        options.push(`precision: ${field.precision}`, `scale: ${field.scale}`);
+    if (field.type === 'enum')
+        options.push(`enum: [${enumValues(field)}]`, `enumName: '${enumName(className, field)}'`);
     if (field.unique)
         options.push('unique: true');
     return `    @Column({ ${options.join(', ')} })\n    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`;
@@ -35,17 +51,27 @@ function validationDecorators(field, optional) {
             : ['@IsDefined()'];
     decorators.push(field.type === 'number'
         ? '@IsNumber()'
-        : field.type === 'boolean'
-            ? '@IsBoolean()'
-            : field.type === 'date'
-                ? '@IsDateString()'
-                : field.type === 'uuid'
-                    ? '@IsUUID()'
-                    : '@IsString()');
+        : field.type === 'integer'
+            ? '@IsInt()'
+            : field.type === 'decimal'
+                ? `@IsDecimal({ decimal_digits: '1,${field.scale}', force_decimal: false })`
+                : field.type === 'enum'
+                    ? `@IsIn([${enumValues(field)}])`
+                    : field.type === 'boolean'
+                        ? '@IsBoolean()'
+                        : field.type === 'date'
+                            ? '@IsDateString()'
+                            : field.type === 'uuid'
+                                ? '@IsUUID()'
+                                : '@IsString()');
     return decorators;
 }
 function swaggerType(field) {
-    return field.type === 'number' ? 'Number' : field.type === 'boolean' ? 'Boolean' : 'String';
+    return field.type === 'number' || field.type === 'integer'
+        ? 'Number'
+        : field.type === 'boolean'
+            ? 'Boolean'
+            : 'String';
 }
 function swaggerProperty(field, optional) {
     const required = !optional && !field.nullable;
@@ -56,6 +82,12 @@ function swaggerProperty(field, optional) {
         options.push("format: 'date-time'");
     if (field.type === 'uuid')
         options.push("format: 'uuid'");
+    if (field.type === 'integer')
+        options.push("format: 'int32'");
+    if (field.type === 'decimal')
+        options.push("format: 'decimal'", "description: 'Nombre décimal transmis sous forme de chaîne pour préserver sa précision.'");
+    if (field.type === 'enum')
+        options.push(`enum: [${enumValues(field)}]`);
     if (field.unique)
         options.push("description: 'Valeur unique.'");
     return `@${required ? 'ApiProperty' : 'ApiPropertyOptional'}({ ${options.join(', ')} })`;
@@ -118,6 +150,12 @@ function applicationContract(name, className, fields) {
 function sampleValue(field, transport) {
     if (field.type === 'number')
         return '42';
+    if (field.type === 'integer')
+        return '42';
+    if (field.type === 'decimal')
+        return `'123${field.scale ? `.${'4'.repeat(field.scale)}` : ''}'`;
+    if (field.type === 'enum')
+        return `'${field.enumValues[0]}'`;
     if (field.type === 'boolean')
         return 'true';
     if (field.type === 'date')
@@ -146,6 +184,12 @@ function generatedUnitTest(name, className, fields, advanced) {
 function updatedTestValue(field) {
     if (field.type === 'number')
         return '84';
+    if (field.type === 'integer')
+        return '84';
+    if (field.type === 'decimal')
+        return `'456${field.scale ? `.${'5'.repeat(field.scale)}` : ''}'`;
+    if (field.type === 'enum')
+        return `'${field.enumValues[1] ?? field.enumValues[0]}'`;
     if (field.type === 'boolean')
         return 'false';
     if (field.type === 'date')
@@ -157,6 +201,12 @@ function updatedTestValue(field) {
 function invalidTestValue(field) {
     if (field.type === 'number')
         return "'invalid-number'";
+    if (field.type === 'integer')
+        return "'invalid-integer'";
+    if (field.type === 'decimal')
+        return "'invalid-decimal'";
+    if (field.type === 'enum')
+        return "'INVALID_ENUM_VALUE'";
     if (field.type === 'boolean')
         return "'invalid-boolean'";
     if (field.type === 'date')
@@ -263,13 +313,29 @@ function e2eSupportFiles(projectRoot) {
     }
     return files;
 }
-function prismaModelFields(fields) {
-    return fields.map((field) => `  ${field.name} ${prismaType(field)}`).join('\n');
+function prismaModelFields(className, fields) {
+    return fields
+        .map((field) => {
+        if (field.type === 'enum')
+            return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}`;
+        if (field.type === 'decimal')
+            return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}`;
+        return `  ${field.name} ${prismaType(field)}`;
+    })
+        .join('\n');
 }
 function prismaSchema(source, className, table, fields) {
     if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
         throw new Error(`Le modèle Prisma ${className} existe déjà.`);
-    return `${source.trimEnd()}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(fields)}\n\n  @@map("${table}")\n}\n`;
+    const definitions = fields
+        .filter((field) => field.type === 'enum')
+        .map((field) => {
+        const name = enumName(className, field);
+        if (new RegExp(`\\benum\\s+${name}\\b`).test(source))
+            throw new Error(`L'enum Prisma ${name} existe déjà.`);
+        return `enum ${name} {\n${field.enumValues.map((value) => `  ${value}`).join('\n')}\n}`;
+    });
+    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}\n\n  @@map("${table}")\n}\n`;
 }
 function prismaRuntime(projectRoot) {
     const service = projectPath(projectRoot, 'src/prisma/prisma.service.ts');
@@ -299,11 +365,15 @@ function prismaResourceFiles(name, className, fields, route) {
     const input = fields
         .map((field) => `...((input as Record<string, unknown>).${field.name} === undefined ? {} : { ${field.name}${field.type === 'date' ? `: (input as Record<string, unknown>).${field.name} === null ? null : new Date((input as Record<string, unknown>).${field.name} as string)` : `: (input as Record<string, unknown>).${field.name}`} })`)
         .join(', ');
+    const decimalMapping = fields
+        .filter((field) => field.type === 'decimal')
+        .map((field) => `${field.name}: value.${field.name} === null ? null : String(value.${field.name})`)
+        .join(', ');
     files.set(`domain/${name}.ts`, `export class ${className} {\n    id!: string;\n${properties}\n}\n`);
     files.set(`dto/create-${name}.dto.ts`, `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`);
     files.set(`dto/update-${name}.dto.ts`, `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`);
     files.set(`dto/list-${name}.query.ts`, `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport class List${className}Query {\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;\n}\n`);
-    files.set(`persistence/${name}.repository.ts`, `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}): ${className} { return Object.assign(new ${className}(), value); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`);
+    files.set(`persistence/${name}.repository.ts`, `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { ${className} as ${className}Record, Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}Record): ${className} { return Object.assign(new ${className}(), value${decimalMapping ? `, { ${decimalMapping} }` : ''}); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`);
     files.set(`${name}.controller.ts`, `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }\n}\n`);
     files.set(`${name}.module.ts`, `import { Module } from '@nestjs/common';\nimport { PrismaModule } from '../../prisma/prisma.module.js';\nimport { ${className}Controller } from './${name}.controller.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({ imports: [PrismaModule], controllers: [${className}Controller], providers: [${className}Repository] })\nexport class ${className}Module {}\n`);
     const repositoryPath = `persistence/${name}.repository.ts`;
@@ -321,7 +391,7 @@ function prismaResourceFiles(name, className, fields, route) {
 }
 function featureFiles(name, className, fields, route, table, profile, swagger) {
     const advanced = profile === 'advanced';
-    const entityProperties = fields.map(entityColumn).join('\n\n');
+    const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
     const fieldAssignments = propertyMap(fields);
     const domainProperties = fields
         .map((field) => `    ${field.name}!: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
