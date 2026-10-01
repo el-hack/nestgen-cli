@@ -83,6 +83,8 @@ function assertTarballContents(packResult) {
         'nestjs-generator/features/add_module.sh',
         'nestjs-generator/features/preflight.mjs',
         'nestjs-generator/features/update_app_module.mjs',
+        'nestjs-generator/features/operations.sh',
+        'nestjs-generator/features/operational_foundation.mjs',
     ];
 
     for (const filePath of files) {

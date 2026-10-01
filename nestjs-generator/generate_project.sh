@@ -87,7 +87,12 @@ if [ "$WITH_SWAGGER" = "y" ]; then
   run_step "Configuration Swagger" bash "$FEATURES_PATH/swagger.sh" "$PM"
 fi
 
-run_step "Configuration du bootstrap Nest" node "$FEATURES_PATH/configure_bootstrap.mjs" src/main.ts "$WITH_SWAGGER"
+WITH_OPERATIONS=${WITH_OPERATIONS:-$(read -p "🩺 Activer le socle d’exploitation ? (y/n) : " tmp && echo "$tmp")}
+if [ "$WITH_OPERATIONS" = "y" ]; then
+  run_step "Configuration du socle d’exploitation" bash "$FEATURES_PATH/operations.sh" "$ORM"
+fi
+
+run_step "Configuration du bootstrap Nest" node "$FEATURES_PATH/configure_bootstrap.mjs" src/main.ts "$WITH_SWAGGER" "$WITH_OPERATIONS"
 
 WITH_GIT=${WITH_GIT:-$(read -p "🔃 Initialiser Git ? (y/n) : " tmp && echo "$tmp")}
 if [ "$WITH_GIT" = "y" ]; then
@@ -109,5 +114,6 @@ echo "📦 Package manager : $PM"
 echo "🧠 ORM : $ORM"
 if [ "$WITH_DOCKER" = "y" ]; then echo "🐳 Docker activé"; fi
 if [ "$WITH_SWAGGER" = "y" ]; then echo "📚 Swagger activé"; fi
+if [ "$WITH_OPERATIONS" = "y" ]; then echo "🩺 Socle d’exploitation activé"; fi
 if [ "$WITH_GIT" = "y" ]; then echo "🔃 Git initialisé"; fi
 if [ -n "$MODULES" ]; then echo "📦 Modules générés : $MODULES"; fi

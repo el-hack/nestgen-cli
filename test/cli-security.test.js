@@ -581,6 +581,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             projectPath: undefined,
             docker: undefined,
             swagger: undefined,
+            operations: undefined,
             git: undefined,
             modules: undefined,
             application: undefined,
@@ -607,12 +608,14 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
         '--orm=typeorm',
         '--docker',
         '--no-swagger',
+        '--operations',
         '--git',
         '--modules=user,product',
     ]);
     assert.equal(init.options.projectPath, './generated');
     assert.equal(init.options.docker, true);
     assert.equal(init.options.swagger, false);
+    assert.equal(init.options.operations, true);
     assert.equal(init.options.git, true);
     assert.equal(init.options.modules, 'user,product');
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
@@ -1586,6 +1589,7 @@ function runProjectGeneration(fixturePath, binPath, extraEnvironment = {}) {
             ORM: 'typeorm',
             WITH_DOCKER: 'n',
             WITH_SWAGGER: 'n',
+            WITH_OPERATIONS: 'n',
             WITH_GIT: 'n',
             MODULES: '',
             ...extraEnvironment,
@@ -1626,4 +1630,16 @@ test('completes a zero-module project generation after every external step succe
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Projet NestJS "sample" généré avec succès/);
     assert.equal(fs.existsSync(path.join(fixturePath, 'sample', 'src', 'app.module.ts')), true);
+});
+
+test('adds the operational foundation only when init explicitly enables it', () => {
+    const { fixturePath, binPath } = createExternalCommandFixture();
+    const result = runProjectGeneration(fixturePath, binPath, { WITH_OPERATIONS: 'y' });
+    const project = path.join(fixturePath, 'sample', 'src');
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Socle d’exploitation activé/);
+    assert.equal(fs.existsSync(path.join(project, 'operations', 'health.controller.ts')), true);
+    assert.match(fs.readFileSync(path.join(project, 'main.ts'), 'utf8'), /enableShutdownHooks/);
+    assert.match(fs.readFileSync(path.join(project, 'app.module.ts'), 'utf8'), /OperationsModule/);
 });
