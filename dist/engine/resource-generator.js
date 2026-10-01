@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
-import { availableFeatureDirectory, projectPath } from './project-path.js';
-import { applyFileChanges } from './file-transaction.js';
+import { projectPath } from './project-path.js';
+import { applyFileChanges, previewFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
 import { prismaType, typescriptType, } from './resource-spec.js';
@@ -991,7 +991,7 @@ function featureFiles(name, className, fields, route, table, profile, swagger, i
     files.set(unitTest.path, "import { beforeEach, describe, expect, it, jest } from '@jest/globals';\n" + unitTestContent);
     return files;
 }
-export async function generateResource(projectRoot, options) {
+export async function planResourceGeneration(projectRoot, options) {
     const profile = parseArchitectureProfile(options.profile);
     const orm = options.orm ?? 'typeorm';
     if (orm !== 'typeorm' && orm !== 'prisma')
@@ -1002,7 +1002,7 @@ export async function generateResource(projectRoot, options) {
     const className = pascal(name);
     const project = inspectProject(projectRoot, orm, { cqrs: false, application: options.application });
     projectRoot = project.root;
-    availableFeatureDirectory(projectRoot, name, project.sourceRoot);
+    const featureDirectory = projectPath(projectRoot, `${project.sourceRoot}/app/${name}`);
     const appModulePath = project.appModulePath;
     const relations = resolveRelations(projectRoot, project.sourceRoot, name, orm, options.fields, options.relations);
     const fields = [...options.fields, ...relationFields(relations)];
@@ -1029,8 +1029,15 @@ export async function generateResource(projectRoot, options) {
             operation: 'create',
         });
         changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
-        applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
-        return;
+        const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+        return {
+            root: projectRoot,
+            changes: formattedChanges,
+            preview: previewFileChanges(projectRoot, formattedChanges),
+            featureConflict: fs.existsSync(featureDirectory)
+                ? `Le module ou la ressource ${name} existe déjà.`
+                : undefined,
+        };
     }
     const manifest = JSON.parse(fs.readFileSync(projectPath(projectRoot, 'package.json'), 'utf8'));
     const swagger = Boolean(manifest.dependencies?.['@nestjs/swagger'] ?? manifest.devDependencies?.['@nestjs/swagger']);
@@ -1052,5 +1059,20 @@ export async function generateResource(projectRoot, options) {
         operation: 'create',
     });
     changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
-    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
+    const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    return {
+        root: projectRoot,
+        changes: formattedChanges,
+        preview: previewFileChanges(projectRoot, formattedChanges),
+        featureConflict: fs.existsSync(featureDirectory) ? `Le module ou la ressource ${name} existe déjà.` : undefined,
+    };
+}
+export async function generateResource(projectRoot, options) {
+    const plan = await planResourceGeneration(projectRoot, options);
+    if (plan.featureConflict)
+        throw new Error(plan.featureConflict);
+    const conflict = plan.preview.find((change) => change.status === 'conflict');
+    if (conflict)
+        throw new Error(conflict.reason);
+    applyFileChanges(plan.root, plan.changes);
 }

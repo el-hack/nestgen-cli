@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import { inspectProject } from './project-preflight.js';
-import { availableFeatureDirectory, projectPath } from './project-path.js';
-import { applyFileChanges, FileChange } from './file-transaction.js';
+import { projectPath } from './project-path.js';
+import { applyFileChanges, FileChange, previewFileChanges } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
+import type { GenerationPlan } from './module-generator.js';
 import {
     prismaType,
     ResourceField,
@@ -1335,7 +1336,7 @@ function featureFiles(
     return files;
 }
 
-export async function generateResource(projectRoot: string, options: Options): Promise<void> {
+export async function planResourceGeneration(projectRoot: string, options: Options): Promise<GenerationPlan> {
     const profile = parseArchitectureProfile(options.profile);
     const orm = options.orm ?? 'typeorm';
     if (orm !== 'typeorm' && orm !== 'prisma') throw new Error('ORM non supporté.');
@@ -1344,7 +1345,7 @@ export async function generateResource(projectRoot: string, options: Options): P
     const className = pascal(name);
     const project = inspectProject(projectRoot, orm, { cqrs: false, application: options.application });
     projectRoot = project.root;
-    availableFeatureDirectory(projectRoot, name, project.sourceRoot);
+    const featureDirectory = projectPath(projectRoot, `${project.sourceRoot}/app/${name}`);
     const appModulePath = project.appModulePath;
     const relations = resolveRelations(projectRoot, project.sourceRoot, name, orm, options.fields, options.relations);
     const fields = [...options.fields, ...relationFields(relations)];
@@ -1384,8 +1385,15 @@ export async function generateResource(projectRoot: string, options: Options): P
             operation: 'create',
         });
         changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
-        applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
-        return;
+        const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+        return {
+            root: projectRoot,
+            changes: formattedChanges,
+            preview: previewFileChanges(projectRoot, formattedChanges),
+            featureConflict: fs.existsSync(featureDirectory)
+                ? `Le module ou la ressource ${name} existe déjà.`
+                : undefined,
+        };
     }
     const manifest = JSON.parse(fs.readFileSync(projectPath(projectRoot, 'package.json'), 'utf8')) as {
         dependencies?: Record<string, unknown>;
@@ -1428,5 +1436,19 @@ export async function generateResource(projectRoot: string, options: Options): P
         operation: 'create',
     });
     changes.push({ path: `${project.sourceRoot}/app.module.ts`, content: appModule, operation: 'replace' });
-    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
+    const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    return {
+        root: projectRoot,
+        changes: formattedChanges,
+        preview: previewFileChanges(projectRoot, formattedChanges),
+        featureConflict: fs.existsSync(featureDirectory) ? `Le module ou la ressource ${name} existe déjà.` : undefined,
+    };
+}
+
+export async function generateResource(projectRoot: string, options: Options): Promise<void> {
+    const plan = await planResourceGeneration(projectRoot, options);
+    if (plan.featureConflict) throw new Error(plan.featureConflict);
+    const conflict = plan.preview.find((change) => change.status === 'conflict');
+    if (conflict) throw new Error(conflict.reason);
+    applyFileChanges(plan.root, plan.changes);
 }

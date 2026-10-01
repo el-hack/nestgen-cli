@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import { formatGeneratedCode } from './generated-code.js';
 import path from 'node:path';
 import ts from 'typescript';
-import { applyFileChanges, FileChange } from './file-transaction.js';
+import { applyFileChanges, FileChange, previewFileChanges, PlannedFileChange } from './file-transaction.js';
 import { inspectProject } from './project-preflight.js';
-import { availableFeatureDirectory } from './project-path.js';
+import { projectPath } from './project-path.js';
 
 export type Orm = 'typeorm' | 'prisma';
 
@@ -174,17 +174,24 @@ function files(resource: Resource, orm: Orm): Map<string, string> {
     return result;
 }
 
-export async function generateModule(
+export type GenerationPlan = {
+    root: string;
+    changes: FileChange[];
+    preview: PlannedFileChange[];
+    featureConflict?: string;
+};
+
+export async function planModuleGeneration(
     projectRoot: string,
     rawName: string,
     orm: Orm,
     application?: string,
-): Promise<void> {
+): Promise<GenerationPlan> {
     if (orm !== 'typeorm' && orm !== 'prisma') throw new Error(`ORM non supporté : ${orm}.`);
     const resource = describe(rawName);
     const project = inspectProject(projectRoot, orm, { application });
     projectRoot = project.root;
-    availableFeatureDirectory(projectRoot, resource.name, project.sourceRoot);
+    const featureDirectory = projectPath(projectRoot, `${project.sourceRoot}/app/${resource.name}`);
     const appModule = fs.readFileSync(project.appModulePath, 'utf8');
     const changes: FileChange[] = [...files(resource, orm)].map(([relative, content]) => ({
         path: `${project.sourceRoot}/app/${resource.name}/${relative}`,
@@ -209,5 +216,26 @@ export async function generateModule(
         });
         changes.push(...prismaRuntimeChanges(projectRoot, project.sourceRoot));
     }
-    applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
+    const formattedChanges = await formatGeneratedCode(projectRoot, changes);
+    return {
+        root: projectRoot,
+        changes: formattedChanges,
+        preview: previewFileChanges(projectRoot, formattedChanges),
+        featureConflict: fs.existsSync(featureDirectory)
+            ? `Le module ou la ressource ${resource.name} existe déjà.`
+            : undefined,
+    };
+}
+
+export async function generateModule(
+    projectRoot: string,
+    rawName: string,
+    orm: Orm,
+    application?: string,
+): Promise<void> {
+    const plan = await planModuleGeneration(projectRoot, rawName, orm, application);
+    if (plan.featureConflict) throw new Error(plan.featureConflict);
+    const conflict = plan.preview.find((change) => change.status === 'conflict');
+    if (conflict) throw new Error(conflict.reason);
+    applyFileChanges(plan.root, plan.changes);
 }

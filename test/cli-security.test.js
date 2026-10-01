@@ -15,7 +15,7 @@ import {
 } from '../nestgen.js';
 import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
-import { generateModule } from '../dist/engine/module-generator.js';
+import { generateModule, planModuleGeneration } from '../dist/engine/module-generator.js';
 import {
     parseResourceFields,
     parseResourceIndexes,
@@ -24,7 +24,7 @@ import {
     prismaType,
     typescriptType,
 } from '../dist/engine/resource-spec.js';
-import { generateResource } from '../dist/engine/resource-generator.js';
+import { generateResource, planResourceGeneration } from '../dist/engine/resource-generator.js';
 
 const cliPath = path.resolve('nestgen.js');
 const addModuleScriptPath = path.resolve('nestjs-generator/features/add_module.sh');
@@ -553,6 +553,81 @@ test('creates a deterministic module dry-run plan', () => {
     assert.deepEqual(first, second);
     assert.equal(first.files.includes('src/app/order-item/order-item.module.ts'), true);
     assert.match(first.mutations.join('\n'), /TypeORM racine/);
+});
+
+test('previews the exact generation transaction without writing and reports conflicts', async (t) => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-dry-run-'));
+    t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+
+    const modulePlan = await planModuleGeneration(fixturePath, 'invoice', 'typeorm');
+    const resourcePlan = await planResourceGeneration(fixturePath, {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        fields: parseResourceFields(['sku:string!']),
+    });
+    assert.equal(
+        modulePlan.preview.some((change) => change.path === 'src/app.module.ts' && change.status === 'replace'),
+        true,
+    );
+    assert.equal(
+        resourcePlan.preview.some((change) => change.path === 'src/app.module.ts' && change.status === 'replace'),
+        true,
+    );
+    assert.match(
+        modulePlan.preview.find((change) => change.path === 'src/app.module.ts').diff,
+        /\+import \{ InvoiceModule \}/,
+    );
+    assert.equal(fs.existsSync(path.join(fixturePath, 'src', 'app', 'invoice')), false);
+    assert.equal(
+        fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8').includes('InvoiceModule'),
+        false,
+    );
+
+    const dryRun = spawnSync(
+        process.execPath,
+        [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--quiet'],
+        {
+            cwd: fixturePath,
+            encoding: 'utf8',
+        },
+    );
+    assert.equal(dryRun.status, 0, dryRun.stderr);
+    const output = JSON.parse(dryRun.stdout);
+    assert.equal(output.version, 1);
+    assert.deepEqual(
+        output.changes,
+        modulePlan.preview.map(({ path, operation, status, diff, reason }) => ({
+            path,
+            operation,
+            status,
+            ...(diff ? { diff } : {}),
+            ...(reason ? { reason } : {}),
+        })),
+    );
+    assert.deepEqual(output.conflicts, []);
+
+    await generateModule(fixturePath, 'invoice', 'typeorm');
+    for (const change of modulePlan.changes) assert.equal(fs.existsSync(path.join(fixturePath, change.path)), true);
+    assert.equal(
+        fs.readFileSync(path.join(fixturePath, 'src', 'app.module.ts'), 'utf8'),
+        modulePlan.changes.find((change) => change.path === 'src/app.module.ts').content,
+    );
+
+    const conflictRun = spawnSync(
+        process.execPath,
+        [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--quiet'],
+        { cwd: fixturePath, encoding: 'utf8' },
+    );
+    assert.equal(conflictRun.status, 0, conflictRun.stderr);
+    const conflictOutput = JSON.parse(conflictRun.stdout);
+    assert.match(conflictOutput.conflicts[0].reason, /existe déjà/);
 });
 
 test('exposes stable help, version and error exit codes', () => {

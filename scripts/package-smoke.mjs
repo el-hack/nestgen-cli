@@ -118,7 +118,16 @@ try {
         [binaryPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--no-interactive', '--quiet'],
         { cwd: fixtureDirectory },
     );
-    assert.match(dryRun.stdout, /"module": "invoice"/);
+    const dryRunPlan = JSON.parse(dryRun.stdout);
+    assert.equal(dryRunPlan.version, 1);
+    assert.equal(dryRunPlan.operation, 'module');
+    assert.equal(dryRunPlan.conflicts.length, 0);
+    assert.equal(
+        dryRunPlan.changes.some(
+            (change) => change.path === 'src/app/invoice/invoice.module.ts' && change.status === 'create',
+        ),
+        true,
+    );
     assert.equal(fs.existsSync(path.join(fixtureDirectory, 'src', 'app', 'invoice')), false);
 
     run(
