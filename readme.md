@@ -8,14 +8,14 @@ NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources
 
 ## Supported contract
 
-- Node.js `>=24.15.0 <27`, npm 11, pnpm or Yarn.
+- Node.js `>=24.15.0 <27` (24, 25 and 26), npm 11, pnpm 10 or Yarn Berry 4. Windows is supported through WSL2 because project generation requires Bash.
 - `init` creates a NestJS project interactively with TypeORM or Prisma.
 - `module <name>` adds the advanced module layout for TypeORM or Prisma.
 - `resource <name>` generates a TypeORM or Prisma REST CRUD: entity or model, DTOs, repository, controller, validation, pagination, `404` and unique-constraint `409`.
 - `doctor`, `--dry-run`, `--help`, `--version`, `--no-interactive` and `--quiet` are scriptable CLI features.
 - Existing Nest projects are supported when `nest-cli.json` declares a custom `sourceRoot`. In a workspace with several applications, pass `--application <name>` to target one application explicitly.
 
-The repository CI validates linting, formatting, generator contracts, a Prisma integration, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, and the npm tarball. It does not publish releases or deploy applications.
+The repository CI executes generator contracts on the declared Node lines and on Linux and macOS. Windows users are supported through WSL2, whose Linux environment is covered by the Ubuntu runner. On Ubuntu/Node 24.15 it additionally validates Prisma, a TypeORM HTTP/PostgreSQL integration, generated Docker configurations, package-manager lockfile creation and locked reinstallation for npm, pnpm and Yarn, and the npm tarball. It does not publish releases or deploy applications. See [COMPATIBILITY.md](COMPATIBILITY.md) for the exact coverage and exclusions.
 
 ## Outputs by ORM
 

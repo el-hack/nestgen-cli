@@ -40,6 +40,32 @@ try {
     run('docker', ['compose', '-f', 'compose.yaml', 'config']);
     run('docker', ['build', '--target', 'development', '--tag', `${tag}-development`, '.']);
     run('docker', ['build', '--target', 'production', '--tag', `${tag}-production`, '.']);
+
+    for (const packageManager of [
+        {
+            name: 'pnpm',
+            lockfile: 'pnpm-lock.yaml',
+            install: 'RUN pnpm install --frozen-lockfile',
+            productionInstall: 'RUN pnpm install --prod --frozen-lockfile',
+        },
+        {
+            name: 'yarn',
+            lockfile: 'yarn.lock',
+            install: 'RUN yarn install --frozen-lockfile',
+            productionInstall: 'RUN yarn install --production=true --frozen-lockfile',
+        },
+    ]) {
+        fs.rmSync(path.join(root, 'Dockerfile'));
+        fs.rmSync(path.join(root, 'compose.yaml'));
+        fs.rmSync(path.join(root, '.dockerignore'));
+        fs.writeFileSync(path.join(root, packageManager.lockfile), 'lockfile fixture\n');
+        run('bash', [dockerScript, 'docker-integration', packageManager.name]);
+
+        const packageManagerDockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+        assert.match(packageManagerDockerfile, new RegExp(`COPY package\\.json ${packageManager.lockfile} ./`));
+        assert.match(packageManagerDockerfile, new RegExp(packageManager.install));
+        assert.match(packageManagerDockerfile, new RegExp(packageManager.productionInstall));
+    }
 } finally {
     spawnSync('docker', ['image', 'rm', '--force', `${tag}-development`, `${tag}-production`], { encoding: 'utf8' });
     fs.rmSync(root, { recursive: true, force: true });
