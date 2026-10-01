@@ -11,6 +11,7 @@ import {
     resolveProjectPath,
     validateModuleName,
     validateOrm,
+    loadResourceDefinition,
 } from '../nestgen.js';
 import { describeResource } from '../nestjs-generator/features/resource_name.mjs';
 import { inspectProject } from '../nestjs-generator/features/preflight.mjs';
@@ -114,6 +115,29 @@ test('parses a reusable resource field contract', () => {
     assert.throws(() => parseResourceIndexes(['missing+sku'], fields));
 });
 
+test('loads a versioned resource definition and reports invalid locations', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-definition-'));
+    const definitionPath = path.join(root, 'product.resource.json');
+    fs.writeFileSync(
+        definitionPath,
+        JSON.stringify({
+            version: 1,
+            name: 'product',
+            route: 'catalog/products',
+            table: 'catalog_products',
+            orm: 'prisma',
+            profile: 'advanced',
+            fields: ['sku:string!', 'status:enum(DRAFT|ACTIVE)'],
+            indexes: ['sku+status'],
+        }),
+    );
+    assert.deepEqual(loadResourceDefinition('product.resource.json', root).indexes, ['sku+status']);
+    fs.writeFileSync(definitionPath, JSON.stringify({ version: 1, fields: ['bad field'] }));
+    assert.throws(() => loadResourceDefinition('product.resource.json', root), /fields\[0\]/);
+    fs.writeFileSync(definitionPath, JSON.stringify({ version: 2, fields: [] }));
+    assert.throws(() => loadResourceDefinition('product.resource.json', root), /version 1 requise/);
+});
+
 test('generates a product resource from its business fields', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-resource-'));
     writeNestManifest(fixturePath);
@@ -212,6 +236,7 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             profile: undefined,
             packageManager: undefined,
             indexes: undefined,
+            definitionFile: undefined,
             noInteractive: true,
             quiet: true,
             verbose: false,

@@ -113,6 +113,25 @@ nestgen resource product \
 
 NestGen refuse les combinaisons incompatibles, les bornes inversées et les index qui ciblent un champ absent. Les contraintes sont reflétées dans les DTOs, OpenAPI lorsque Swagger est installé, et les schémas TypeORM ou Prisma. Les index reçoivent un nom déterministe fondé sur la table et leurs colonnes, y compris lorsque PostgreSQL impose une limite de longueur.
 
+## Définition de ressource dans un fichier
+
+`nestgen resource --file product.resource.json` lit un JSON versionné. La version actuelle est `1`. Les options de ligne de commande (`<name>`, `--fields`, `--route`, `--table`, `--orm`, `--profile`, `--indexes`) remplacent la valeur du fichier lorsqu’elles sont présentes.
+
+```json
+{
+    "version": 1,
+    "name": "product",
+    "route": "catalog/products",
+    "table": "catalog_products",
+    "orm": "prisma",
+    "profile": "advanced",
+    "fields": ["sku:string!", "status:enum(DRAFT|ACTIVE)"],
+    "indexes": ["sku+status"]
+}
+```
+
+Le fichier doit être situé dans le projet courant. Les diagnostics indiquent le fichier et le champ ou l’index concerné, et `--dry-run` produit le même plan que la définition équivalente en flags.
+
 On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
 `null` clears only nullable fields and is rejected for other fields. Values such as
 `false`, `0` and an empty string are preserved when valid for the field type.
