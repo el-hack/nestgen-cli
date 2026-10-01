@@ -545,39 +545,148 @@ function printUsage() {
 }
 
 function runDoctor(machine = false) {
-    const checks = [
-        [
-            'Node.js',
-            process.versions.node,
-            Number(process.versions.node.split('.')[0]) >= 24,
-            'Installe Node.js 24 LTS ou une version supportée.',
-        ],
-        [
-            'Scripts NestGen',
-            `${GENERATE_SCRIPT}, ${ADD_MODULE_SCRIPT}`,
-            fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT),
-            'Réinstalle NestGen.',
-        ],
-    ];
-    if (!machine)
-        for (const [name, detail, valid, advice] of checks)
-            console.log(`${valid ? 'OK' : 'ERREUR'} ${name}: ${detail}${valid ? '' : ` — ${advice}`}`);
+    const diagnostics = [];
+    const add = (id, severity, cause, action, detail) => diagnostics.push({ id, severity, cause, action, detail });
+    const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+    add(
+        'NODE_VERSION',
+        nodeMajor === 24 && nodeMinor >= 15 ? 'INFO' : 'ERROR',
+        nodeMajor === 24 && nodeMinor >= 15 ? 'Version Node.js compatible.' : 'Node.js doit être >=24.15.0 et <27.',
+        'Installe une version Node.js supportée puis relance doctor.',
+        process.versions.node,
+    );
+    add(
+        'GENERATOR_SCRIPTS',
+        fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT) ? 'INFO' : 'ERROR',
+        fs.existsSync(GENERATE_SCRIPT) && fs.existsSync(ADD_MODULE_SCRIPT)
+            ? 'Scripts du générateur disponibles.'
+            : 'Un script du générateur est introuvable.',
+        'Réinstalle NestGen.',
+        `${GENERATE_SCRIPT}, ${ADD_MODULE_SCRIPT}`,
+    );
+    const projectRoot = process.cwd();
+    const packagePath = path.join(projectRoot, 'package.json');
+    let manifest;
+    if (!fs.existsSync(packagePath)) {
+        add(
+            'PROJECT_PACKAGE',
+            'WARNING',
+            'Aucun package.json de projet détecté.',
+            'Exécute doctor à la racine du projet Nest.',
+            packagePath,
+        );
+    } else {
+        try {
+            manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+            const dependencies = { ...(manifest.dependencies ?? {}), ...(manifest.devDependencies ?? {}) };
+            for (const dependency of ['@nestjs/common', '@nestjs/core'])
+                add(
+                    `DEPENDENCY_${dependency.replace(/^@/, '').replaceAll(/[/-]/g, '_').toUpperCase()}`,
+                    dependencies[dependency] ? 'INFO' : 'ERROR',
+                    dependencies[dependency] ? `${dependency} est déclaré.` : `${dependency} est absent.`,
+                    `Installe ${dependency} avec le package manager du projet.`,
+                    dependencies[dependency] ?? '',
+                );
+            const nestVersion = String(dependencies['@nestjs/common'] ?? '');
+            if (nestVersion)
+                add(
+                    'NEST_VERSION',
+                    /(?:\^|~)?12(?:\.|$)/.test(nestVersion) ? 'INFO' : 'WARNING',
+                    /(?:\^|~)?12(?:\.|$)/.test(nestVersion)
+                        ? 'La version Nest déclarée est supportée.'
+                        : 'La version Nest déclarée est hors de la matrice testée.',
+                    'Utilise Nest 12 ou vérifie cette combinaison avec la matrice de compatibilité.',
+                    nestVersion,
+                );
+            if (dependencies['@nestjs/typeorm'] || dependencies.typeorm)
+                add(
+                    'TYPEORM_COHERENCE',
+                    dependencies['@nestjs/typeorm'] && dependencies.typeorm ? 'INFO' : 'WARNING',
+                    dependencies['@nestjs/typeorm'] && dependencies.typeorm
+                        ? 'Les dépendances TypeORM sont cohérentes.'
+                        : 'Le support TypeORM est incomplet.',
+                    'Installe @nestjs/typeorm et typeorm ensemble, ou utilise Prisma.',
+                    '',
+                );
+            if (dependencies['@prisma/client'])
+                add(
+                    'PRISMA_CLIENT',
+                    'INFO',
+                    '@prisma/client est déclaré.',
+                    'Exécute npx prisma generate après une modification du schéma.',
+                    dependencies['@prisma/client'],
+                );
+        } catch (error) {
+            add(
+                'PROJECT_PACKAGE',
+                'ERROR',
+                'package.json est invalide.',
+                'Corrige le JSON du manifeste.',
+                error.message,
+            );
+        }
+    }
+    try {
+        const config = loadConfigIfPresent(projectRoot);
+        add(
+            'NESTGEN_CONFIG',
+            'INFO',
+            config
+                ? 'Configuration NestGen valide.'
+                : 'Configuration NestGen absente ; les valeurs par défaut seront utilisées.',
+            config ? 'Aucune action requise.' : 'Exécute nestgen config init pour figer les choix du projet.',
+            config ? `orm=${config.orm}; profile=${config.profile}; packageManager=${config.packageManager}` : '',
+        );
+        if (config) {
+            const lockfile =
+                config.packageManager === 'npm'
+                    ? 'package-lock.json'
+                    : config.packageManager === 'pnpm'
+                      ? 'pnpm-lock.yaml'
+                      : 'yarn.lock';
+            add(
+                'PACKAGE_MANAGER_LOCKFILE',
+                fs.existsSync(path.join(projectRoot, lockfile)) ? 'INFO' : 'WARNING',
+                fs.existsSync(path.join(projectRoot, lockfile))
+                    ? `Le lockfile ${lockfile} correspond à la configuration.`
+                    : `Le lockfile ${lockfile} est absent.`,
+                `Installe les dépendances avec ${config.packageManager} pour créer le lockfile attendu.`,
+                lockfile,
+            );
+        }
+    } catch (error) {
+        add(
+            'NESTGEN_CONFIG',
+            'ERROR',
+            'Configuration NestGen invalide.',
+            'Corrige nestgen.config.json ou recrée-la.',
+            error.message,
+        );
+    }
     let project;
     try {
-        project = inspectProject(process.cwd(), 'typeorm');
-        if (!machine)
-            console.log(
-                `OK Projet Nest: ${project.packageManager ?? 'lockfile absent'}; connexion TypeORM racine: ${project.hasRootTypeOrmConnection ? 'présente' : 'absente'}.`,
-            );
+        project = inspectProject(projectRoot, 'typeorm', { cqrs: false });
+        add(
+            'NEST_INTEGRATION',
+            'INFO',
+            'Structure Nest et intégration TypeORM valides.',
+            'Aucune action requise.',
+            project.sourceRoot,
+        );
     } catch (error) {
         project = { error: error.message };
-        if (!machine)
-            console.log(
-                `INFO Projet Nest: ${error.message} — Lance doctor depuis un projet Nest compatible pour analyser son intégration.`,
-            );
+        add(
+            'NEST_INTEGRATION',
+            'WARNING',
+            'Le projet ne remplit pas toutes les préconditions TypeORM.',
+            'Lis le diagnostic puis complète la structure ou les dépendances indiquées.',
+            error.message,
+        );
     }
-    if (checks.some(([, , valid]) => !valid)) throw new Error('Des prérequis NestGen sont manquants.');
-    return { checks: checks.map(([name, detail, valid, advice]) => ({ name, detail, valid, advice })), project };
+    if (!machine)
+        for (const diagnostic of diagnostics)
+            console.log(`${diagnostic.severity} ${diagnostic.id}: ${diagnostic.cause} — ${diagnostic.action}`);
+    return { diagnostics, project };
 }
 
 function machineResult(command, result) {

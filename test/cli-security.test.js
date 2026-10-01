@@ -521,6 +521,41 @@ test('emits versioned JSON results and errors for scripts', () => {
     });
 });
 
+test('doctor reports actionable structured diagnostics without changing a project', (t) => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-doctor-'));
+    t.after(() => fs.rmSync(fixturePath, { recursive: true, force: true }));
+    writeNestManifest(fixturePath);
+    fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] }) export class AppModule {}\n",
+    );
+    const before = fs.readdirSync(fixturePath, { recursive: true }).sort();
+    const valid = spawnSync(process.execPath, [cliPath, 'doctor', '--json'], { cwd: fixturePath, encoding: 'utf8' });
+    assert.equal(valid.status, 0, valid.stderr);
+    const validOutput = JSON.parse(valid.stdout);
+    assert.equal(validOutput.ok, true);
+    assert.equal(validOutput.command, 'doctor');
+    for (const diagnostic of validOutput.result.diagnostics) {
+        assert.equal(typeof diagnostic.id, 'string');
+        assert.match(diagnostic.severity, /^(INFO|WARNING|ERROR)$/);
+        assert.ok(diagnostic.cause);
+        assert.ok(diagnostic.action);
+    }
+    assert.equal(validOutput.result.diagnostics.find((entry) => entry.id === 'NEST_INTEGRATION').severity, 'INFO');
+    assert.deepEqual(fs.readdirSync(fixturePath, { recursive: true }).sort(), before);
+
+    fs.writeFileSync(path.join(fixturePath, 'package.json'), '{}');
+    const invalid = spawnSync(process.execPath, [cliPath, 'doctor', '--json'], { cwd: fixturePath, encoding: 'utf8' });
+    assert.equal(invalid.status, 0, invalid.stderr);
+    const invalidOutput = JSON.parse(invalid.stdout);
+    assert.equal(
+        invalidOutput.result.diagnostics.find((entry) => entry.id === 'DEPENDENCY_NESTJS_COMMON').severity,
+        'ERROR',
+    );
+    assert.equal(invalidOutput.result.diagnostics.find((entry) => entry.id === 'NEST_INTEGRATION').severity, 'WARNING');
+});
+
 test('applies the advanced resource profile and versioned project configuration', async () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-profile-'));
     writeNestManifest(fixturePath);
