@@ -17,6 +17,7 @@ import {
 } from './dist/engine/resource-spec.js';
 import { configFileName, defaultConfig, loadConfigIfPresent, writeConfig } from './dist/engine/project-config.js';
 import { parseArchitectureProfile } from './dist/engine/architecture-profile.js';
+import { planResourceMigration } from './dist/engine/migration-plan.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -116,6 +117,7 @@ export function parseCliArgs(args) {
         version: false,
         dryRun: false,
         update: false,
+        migrationName: undefined,
         json: false,
     };
     const positionals = [];
@@ -160,6 +162,8 @@ export function parseCliArgs(args) {
         else if (argument === '--verbose') options.verbose = true;
         else if (argument === '--dry-run') options.dryRun = true;
         else if (argument === '--update') options.update = true;
+        else if (argument === '--migration-name') options.migrationName = args[++index];
+        else if (argument.startsWith('--migration-name=')) options.migrationName = argument.slice(17);
         else if (argument === '--json') options.json = true;
         else if (argument === '--no-color') options.color = false;
         else if (argument === '--help' || argument === '-h') options.help = true;
@@ -496,25 +500,8 @@ async function runResourceGeneration(parsed) {
     const table = parsed.options.table ?? definition.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
-    if (parsed.options.dryRun) {
-        const plan = await planResourceGeneration(process.cwd(), {
-            name,
-            route,
-            table,
-            fields,
-            indexes,
-            relations,
-            list,
-            orm,
-            profile,
-            application: parsed.options.application,
-            update: parsed.options.update,
-        });
-        const output = dryRunOutput('resource', plan);
-        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
-        return output;
-    }
-    await generateResource(process.cwd(), {
+    if (parsed.options.migrationName && !parsed.options.update) throw new Error('--migration-name requiert --update.');
+    const resourceOptions = {
         name,
         route,
         table,
@@ -526,8 +513,34 @@ async function runResourceGeneration(parsed) {
         profile,
         application: parsed.options.application,
         update: parsed.options.update,
-    });
-    return { resource: name, orm, profile, generated: true, ...(parsed.options.update ? { updated: true } : {}) };
+    };
+    const migration = parsed.options.migrationName
+        ? planResourceMigration(
+              process.cwd(),
+              inspectProject(process.cwd(), orm, { application: parsed.options.application }).sourceRoot,
+              name,
+              orm,
+              parsed.options.migrationName,
+              fields,
+              indexes,
+              relations,
+          )
+        : undefined;
+    if (parsed.options.dryRun) {
+        const plan = await planResourceGeneration(process.cwd(), resourceOptions);
+        const output = { ...dryRunOutput('resource', plan), ...(migration ? { migration } : {}) };
+        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
+        return output;
+    }
+    await generateResource(process.cwd(), resourceOptions);
+    return {
+        resource: name,
+        orm,
+        profile,
+        generated: true,
+        ...(parsed.options.update ? { updated: true } : {}),
+        ...(migration ? { migration } : {}),
+    };
 }
 
 function printUsage() {
@@ -543,6 +556,7 @@ function printUsage() {
   --modules <a,b>               Définit les modules init, séparés par des virgules
   --application <nom>           Cible une application d’un workspace Nest
   --update                     Met à jour une ressource déjà générée sans écraser les fichiers modifiés
+  --migration-name <nom>       Prépare une commande de migration officielle avec --update, sans l’appliquer
   --dry-run                    Affiche le plan sans écrire
   --json                       Retourne un résultat JSON versionné
   --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
