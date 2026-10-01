@@ -218,7 +218,7 @@ Use `nestgen --help` for the complete accepted option set. Do not rely on undocu
 
 ## Project configuration and profiles
 
-`nestgen config init` writes a versioned `nestgen.config.json` in the current project. Its ORM, architecture profile and package-manager defaults apply to subsequent resource generation; explicit resource flags take precedence.
+`nestgen config init` writes a versioned `nestgen.config.json` in the current project. For `resource`, the resolution order is flags, then the resource definition file, then configuration, then defaults. For `module`, `--orm` overrides configuration, then the default. `profile` is consumed by `resource`; `packageManager` is consumed by `init` and recorded for tooling, but neither `resource` nor `module` installs packages, so it has no runtime effect there. `sourceRoot` is currently restricted to `src`; custom Nest source roots are rejected before mutation.
 
 ```bash
 nestgen config init --orm typeorm --profile advanced --package-manager npm
