@@ -5,7 +5,7 @@ import { availableFeatureDirectory, projectPath } from './project-path.js';
 import { applyFileChanges } from './file-transaction.js';
 import { parseArchitectureProfile } from './architecture-profile.js';
 import { registerModuleInAppModule } from './module-generator.js';
-import { typescriptType } from './resource-spec.js';
+import { prismaType, typescriptType } from './resource-spec.js';
 function pascal(value) {
     return value
         .split('-')
@@ -263,6 +263,62 @@ function e2eSupportFiles(projectRoot) {
     }
     return files;
 }
+function prismaModelFields(fields) {
+    return fields.map((field) => `  ${field.name} ${prismaType(field)}`).join('\n');
+}
+function prismaSchema(source, className, table, fields) {
+    if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
+        throw new Error(`Le modèle Prisma ${className} existe déjà.`);
+    return `${source.trimEnd()}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(fields)}\n\n  @@map("${table}")\n}\n`;
+}
+function prismaRuntime(projectRoot) {
+    const service = projectPath(projectRoot, 'src/prisma/prisma.service.ts');
+    const module = projectPath(projectRoot, 'src/prisma/prisma.module.ts');
+    if (fs.existsSync(service) && fs.existsSync(module))
+        return [];
+    if (fs.existsSync(service) || fs.existsSync(module))
+        throw new Error('Runtime Prisma incomplet.');
+    return [
+        {
+            path: 'src/prisma/prisma.service.ts',
+            operation: 'create',
+            content: "import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';\nimport { PrismaClient } from '@prisma/client';\n\n@Injectable()\nexport class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {\n    async onModuleInit(): Promise<void> { await this.$connect(); }\n    async onModuleDestroy(): Promise<void> { await this.$disconnect(); }\n}\n",
+        },
+        {
+            path: 'src/prisma/prisma.module.ts',
+            operation: 'create',
+            content: "import { Global, Module } from '@nestjs/common';\nimport { PrismaService } from './prisma.service.js';\n\n@Global()\n@Module({ providers: [PrismaService], exports: [PrismaService] })\nexport class PrismaModule {}\n",
+        },
+    ];
+}
+function prismaResourceFiles(name, className, fields, route) {
+    const files = new Map();
+    const properties = fields
+        .map((field) => `    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
+        .join('\n');
+    const input = fields
+        .map((field) => `...((input as Record<string, unknown>).${field.name} === undefined ? {} : { ${field.name}${field.type === 'date' ? `: (input as Record<string, unknown>).${field.name} === null ? null : new Date((input as Record<string, unknown>).${field.name} as string)` : `: (input as Record<string, unknown>).${field.name}`} })`)
+        .join(', ');
+    files.set(`domain/${name}.ts`, `export class ${className} {\n    id!: string;\n${properties}\n}\n`);
+    files.set(`dto/create-${name}.dto.ts`, `import { ${validationImports(fields, false)} } from 'class-validator';\n\nexport class Create${className}Dto {\n${dtoFields(fields, false)}\n}\n`);
+    files.set(`dto/update-${name}.dto.ts`, `import { ${validationImports(fields, true)} } from 'class-validator';\n\nexport class Update${className}Dto {\n${dtoFields(fields, true)}\n}\n`);
+    files.set(`dto/list-${name}.query.ts`, `import { Type } from 'class-transformer';\nimport { IsInt, IsOptional, Max, Min } from 'class-validator';\n\nexport class List${className}Query {\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;\n    @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;\n}\n`);
+    files.set(`persistence/${name}.repository.ts`, `import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';\nimport { Prisma } from '@prisma/client';\nimport { PrismaService } from '../../../prisma/prisma.service.js';\nimport { ${className} } from '../domain/${name}.js';\n\n@Injectable()\nexport class ${className}Repository {\n    constructor(private readonly prisma: PrismaService) {}\n    private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};\n    async create(input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.create({ data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async findOne(id: string): Promise<${className}> { const value = await this.model.findUnique({ where: { id } }); if (!value) throw new NotFoundException('${className} introuvable'); return this.toDomain(value); }\n    async findMany(skip: number, take: number): Promise<${className}[]> { return (await this.model.findMany({ skip, take, orderBy: { id: 'asc' } })).map((value) => this.toDomain(value)); }\n    async update(id: string, input: Record<string, unknown>): Promise<${className}> { try { return this.toDomain(await this.model.update({ where: { id }, data: { ${input} } } as never)); } catch (error) { this.handle(error); } }\n    async remove(id: string): Promise<void> { try { await this.model.delete({ where: { id } }); } catch (error) { this.handle(error); } }\n    private toDomain(value: ${className}): ${className} { return Object.assign(new ${className}(), value); }\n    private handle(error: unknown): never { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Une ressource avec cette valeur unique existe déjà.'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundException('${className} introuvable'); throw error; }\n}\n`);
+    files.set(`${name}.controller.ts`, `import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';\nimport { Create${className}Dto } from './dto/create-${name}.dto.js';\nimport { List${className}Query } from './dto/list-${name}.query.js';\nimport { Update${className}Dto } from './dto/update-${name}.dto.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Controller('${route}')\nexport class ${className}Controller {\n    constructor(private readonly repository: ${className}Repository) {}\n    @Post() create(@Body() dto: Create${className}Dto) { return this.repository.create(dto); }\n    @Get() async list(@Query() query: List${className}Query) { return { page: query.page, limit: query.limit, data: await this.repository.findMany((query.page - 1) * query.limit, query.limit) }; }\n    @Get(':id') get(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.findOne(id); }\n    @Patch(':id') update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: Update${className}Dto) { return this.repository.update(id, dto); }\n    @Delete(':id') @HttpCode(204) remove(@Param('id', new ParseUUIDPipe()) id: string) { return this.repository.remove(id); }\n}\n`);
+    files.set(`${name}.module.ts`, `import { Module } from '@nestjs/common';\nimport { PrismaModule } from '../../prisma/prisma.module.js';\nimport { ${className}Controller } from './${name}.controller.js';\nimport { ${className}Repository } from './persistence/${name}.repository.js';\n\n@Module({ imports: [PrismaModule], controllers: [${className}Controller], providers: [${className}Repository] })\nexport class ${className}Module {}\n`);
+    const repositoryPath = `persistence/${name}.repository.ts`;
+    files.set(repositoryPath, files
+        .get(repositoryPath)
+        .replace(`private readonly model = this.prisma.${className[0].toLowerCase() + className.slice(1)};`, `private get model() { return this.prisma.${className[0].toLowerCase() + className.slice(1)}; }`)
+        .replaceAll('input: Record<string, unknown>', 'input: object'));
+    const controllerPath = `${name}.controller.ts`;
+    files.set(controllerPath, files
+        .get(controllerPath)
+        .replace('ConflictException, ', '')
+        .replace('this.repository.create(dto)', 'this.repository.create(dto as object)')
+        .replace('this.repository.update(id, dto)', 'this.repository.update(id, dto as object)'));
+    return files;
+}
 function featureFiles(name, className, fields, route, table, profile, swagger) {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map(entityColumn).join('\n\n');
@@ -339,8 +395,8 @@ function featureFiles(name, className, fields, route, table, profile, swagger) {
 export async function generateResource(projectRoot, options) {
     const profile = parseArchitectureProfile(options.profile);
     const orm = options.orm ?? 'typeorm';
-    if (orm !== 'typeorm')
-        throw new Error('La commande resource prend actuellement en charge TypeORM uniquement.');
+    if (orm !== 'typeorm' && orm !== 'prisma')
+        throw new Error('ORM non supporté.');
     const name = options.name.trim().toLowerCase().replaceAll('_', '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name))
         throw new Error('Nom de ressource invalide.');
@@ -349,6 +405,30 @@ export async function generateResource(projectRoot, options) {
     projectRoot = project.root;
     availableFeatureDirectory(projectRoot, name);
     const appModulePath = project.appModulePath;
+    if (orm === 'prisma') {
+        const files = prismaResourceFiles(name, className, options.fields, options.route);
+        const appModule = registerModuleInAppModule(fs.readFileSync(appModulePath, 'utf8'), `${className}Module`, `./app/${name}/${name}.module.js`, `${className}Module`);
+        const schemaPath = projectPath(projectRoot, 'prisma/schema.prisma');
+        const changes = [...files].map(([relative, content]) => ({
+            path: `src/app/${name}/${relative}`,
+            content,
+            operation: 'create',
+        }));
+        changes.push({
+            path: 'prisma/schema.prisma',
+            content: prismaSchema(fs.readFileSync(schemaPath, 'utf8'), className, options.table, options.fields),
+            operation: 'replace',
+        });
+        changes.push(...prismaRuntime(projectRoot));
+        changes.push({
+            path: `src/app/${name}/resource.json`,
+            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+            operation: 'create',
+        });
+        changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
+        applyFileChanges(projectRoot, await formatGeneratedCode(projectRoot, changes));
+        return;
+    }
     const manifest = JSON.parse(fs.readFileSync(projectPath(projectRoot, 'package.json'), 'utf8'));
     const swagger = Boolean(manifest.dependencies?.['@nestjs/swagger'] ?? manifest.devDependencies?.['@nestjs/swagger']);
     const files = featureFiles(name, className, options.fields, options.route, options.table, profile, swagger);

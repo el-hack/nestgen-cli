@@ -18,13 +18,14 @@ The repository CI validates linting, formatting, generator contracts, a Prisma i
 
 ## Outputs by ORM
 
-| Command                         | ORM     | Persistence output                                                                                                    |
-| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `resource` (simple or advanced) | TypeORM | Entity and repository using TypeORM; `resource.json` records `orm: "typeorm"`. No Prisma file or import.              |
-| `module`                        | TypeORM | TypeORM entity and repository, registered with `TypeOrmModule.forFeature`. No Prisma runtime or schema change.        |
-| `module`                        | Prisma  | Prisma repository, model added to `prisma/schema.prisma`, shared Prisma runtime if absent. No TypeORM file or import. |
+| Command                         | ORM     | Persistence output                                                                                                                   |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `resource` (simple or advanced) | TypeORM | Entity and repository using TypeORM; `resource.json` records `orm: "typeorm"`. No Prisma file or import.                             |
+| `resource`                      | Prisma  | Prisma model, Nest module, DTOs, repository and REST controller; `resource.json` records `orm: "prisma"`. No TypeORM file or import. |
+| `module`                        | TypeORM | TypeORM entity and repository, registered with `TypeOrmModule.forFeature`. No Prisma runtime or schema change.                       |
+| `module`                        | Prisma  | Prisma repository, model added to `prisma/schema.prisma`, shared Prisma runtime if absent. No TypeORM file or import.                |
 
-`resource --orm prisma` is currently rejected before writing files. Full Prisma CRUD resource generation is planned separately. Selecting an ORM does not convert an existing resource or remove files produced by older generator versions.
+For Prisma, run `npx prisma generate` and apply the schema with `npx prisma db push` or an explicit migration after generating a resource. Selecting an ORM does not convert an existing resource or remove files produced by older generator versions.
 
 ## Quickstart — TypeORM resource
 

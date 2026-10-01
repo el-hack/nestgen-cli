@@ -376,6 +376,33 @@ test('generates a Prisma model and uses the generated Prisma runtime without ali
     assert.doesNotMatch(repository, /@\/prisma/);
 });
 
+test('generates a Prisma REST resource without TypeORM files', async () => {
+    const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-prisma-resource-'));
+    fs.mkdirSync(path.join(fixturePath, 'src'));
+    fs.mkdirSync(path.join(fixturePath, 'prisma'));
+    writeNestManifest(fixturePath);
+    fs.writeFileSync(
+        path.join(fixturePath, 'src', 'app.module.ts'),
+        "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+    );
+    fs.writeFileSync(
+        path.join(fixturePath, 'prisma', 'schema.prisma'),
+        'generator client { provider = "prisma-client-js" }\n\ndatasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+    await generateResource(fixturePath, {
+        name: 'product',
+        route: 'products',
+        table: 'products',
+        orm: 'prisma',
+        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean']),
+    });
+    const root = path.join(fixturePath, 'src', 'app', 'product');
+    assertOrmOutput(root, 'prisma');
+    assert.match(fs.readFileSync(path.join(fixturePath, 'prisma', 'schema.prisma'), 'utf8'), /sku String @unique/);
+    assert.match(fs.readFileSync(path.join(root, 'product.controller.ts'), 'utf8'), /ParseUUIDPipe/);
+    assert.match(fs.readFileSync(path.join(root, 'persistence', 'product.repository.ts'), 'utf8'), /P2002/);
+});
+
 test('maps package manager operations without a global Nest CLI', () => {
     const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nestgen-package-manager-'));
     const binPath = path.join(fixturePath, 'bin');
