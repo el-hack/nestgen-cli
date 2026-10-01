@@ -36,7 +36,7 @@
         "check": "npm run typecheck && eslint .",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "prepack": "npm run build && npm run check && npm run docs:check && npm run format:check && npm test && npm run test:example",
+        "prepack": "npm run build && npm run check && npm run docs:check && npm run landing:check && npm run format:check && npm test && npm run test:example",
         "test": "node --test",
         "test:package": "node scripts/package-smoke.mjs",
         "test:package-manager": "node scripts/package-manager-lockfile-integration.mjs",
@@ -47,6 +47,7 @@
         "release:verify": "node scripts/release-verify.mjs",
         "release:verify-remote": "node scripts/release-verify-remote.mjs",
         "docs:check": "node scripts/docs-contract.mjs",
+        "landing:check": "node scripts/landing-contract.mjs",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "licenses": "MIT",
