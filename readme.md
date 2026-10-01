@@ -104,7 +104,11 @@ Pour la CI, `init` accepte toutes les réponses interactives sous forme d’opti
 nestgen init store-api --no-interactive --project-path ./generated --package-manager npm --orm typeorm --docker --swagger --git --modules user,product
 ```
 
-Utilisez `--no-docker`, `--no-swagger`, `--no-git` ou `--modules ''` pour les désactiver. En mode non interactif, une option manquante est signalée avant toute écriture ou installation.
+Utilisez `--no-docker`, `--no-swagger`, `--no-operations`, `--no-git` ou `--modules ''` pour les désactiver. En mode non interactif, une option manquante est signalée avant toute écriture ou installation.
+
+### Socle d’exploitation optionnel
+
+Ajoutez `--operations` à `init` pour générer un socle local d’exploitation, sans dépendance à un service tiers. Il expose `GET /health/live` pour la disponibilité du processus et `GET /health/ready` pour la disponibilité de PostgreSQL ; le second renvoie `503` avec l’état de la dépendance lorsque la base est indisponible. Le projet reçoit aussi un middleware `x-request-id`, un logger JSON qui masque les clés sensibles (`password`, `secret`, `token`, `authorization`, `cookie`, `apiKey`) et `enableShutdownHooks()` pour fermer proprement TypeORM ou Prisma sur `SIGTERM` et `SIGINT`. Le contrat et ses limites sont documentés dans `src/operations/README.md` du projet généré.
 
 Fields accepted by `resource` are `string`, `number`, `integer`, `decimal(precision;scale)`, `enum(VALUE|VALUE)`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field. A decimal uses a semicolon between precision and scale so a field list can still be separated by commas. Decimals are exposed as JSON strings to preserve their database precision; enums use uppercase values separated by `|`.
 

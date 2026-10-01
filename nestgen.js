@@ -104,6 +104,7 @@ export function parseCliArgs(args) {
         projectPath: undefined,
         docker: undefined,
         swagger: undefined,
+        operations: undefined,
         git: undefined,
         modules: undefined,
         application: undefined,
@@ -138,6 +139,8 @@ export function parseCliArgs(args) {
         else if (argument === '--no-docker') options.docker = false;
         else if (argument === '--swagger') options.swagger = true;
         else if (argument === '--no-swagger') options.swagger = false;
+        else if (argument === '--operations') options.operations = true;
+        else if (argument === '--no-operations') options.operations = false;
         else if (argument === '--git') options.git = true;
         else if (argument === '--no-git') options.git = false;
         else if (argument === '--modules') options.modules = args[++index];
@@ -281,6 +284,12 @@ async function askInitQuestions() {
         },
         {
             type: 'confirm',
+            name: 'withOperations',
+            message: '🩺 Activer le socle d’exploitation (santé, logs, arrêt propre) ?',
+            default: false,
+        },
+        {
+            type: 'confirm',
             name: 'withGit',
             message: '🔃 Initialiser Git ?',
             default: true,
@@ -326,6 +335,7 @@ async function runInteractiveInit(options) {
                   ['--orm', options.orm],
                   ['--docker ou --no-docker', options.docker],
                   ['--swagger ou --no-swagger', options.swagger],
+                  ['--operations ou --no-operations', options.operations],
                   ['--git ou --no-git', options.git],
                   ['--modules', options.modules],
               ]
@@ -339,12 +349,14 @@ async function runInteractiveInit(options) {
                   orm: options.orm,
                   withDocker: options.docker,
                   withSwagger: options.swagger,
+                  withOperations: options.operations,
                   withGit: options.git,
                   modules: options.modules ? options.modules.split(',').filter(Boolean) : [],
               };
           })()
         : await askInitQuestions();
-    const { projectName, projectPath, packageManager, orm, withSwagger, withDocker, withGit, modules } = answers;
+    const { projectName, projectPath, packageManager, orm, withSwagger, withDocker, withOperations, withGit, modules } =
+        answers;
 
     const env = {
         APP_NAME: validateModuleName(projectName),
@@ -352,6 +364,7 @@ async function runInteractiveInit(options) {
         PM: validatePackageManager(packageManager),
         ORM: validateOrm(orm),
         WITH_SWAGGER: withSwagger ? 'y' : 'n',
+        WITH_OPERATIONS: withOperations ? 'y' : 'n',
         WITH_DOCKER: withDocker ? 'y' : 'n',
         WITH_GIT: withGit ? 'y' : 'n',
         MODULES: modules.map(validateModuleName).join(' '),
@@ -359,7 +372,13 @@ async function runInteractiveInit(options) {
 
     if (!options.quiet) console.log('\n🚀 Lancement de la génération du projet...\n');
     runBashScript(GENERATE_SCRIPT, [], env, options.quiet);
-    return { projectName: env.APP_NAME, projectPath: env.PROJECT_PATH, packageManager: env.PM, orm: env.ORM };
+    return {
+        projectName: env.APP_NAME,
+        projectPath: env.PROJECT_PATH,
+        packageManager: env.PM,
+        orm: env.ORM,
+        operations: env.WITH_OPERATIONS === 'y',
+    };
 }
 
 // ────── Commande : MODULE
@@ -552,6 +571,7 @@ function printUsage() {
   --project-path <chemin>       Définit le dossier parent du projet init
   --docker, --no-docker         Active ou désactive Docker pour init
   --swagger, --no-swagger       Active ou désactive Swagger pour init
+  --operations, --no-operations Active ou désactive le socle d’exploitation pour init
   --git, --no-git               Active ou désactive Git pour init
   --modules <a,b>               Définit les modules init, séparés par des virgules
   --application <nom>           Cible une application d’un workspace Nest
