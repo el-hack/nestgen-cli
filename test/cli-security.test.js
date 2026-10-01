@@ -112,6 +112,10 @@ test('parses a reusable resource field contract', () => {
         { fields: ['title'] },
         { fields: ['sku', 'status'] },
     ]);
+    assert.deepEqual(parseResourceIndexes([], fields, ['sku+status']), [
+        { fields: ['title'] },
+        { fields: ['sku', 'status'], unique: true },
+    ]);
     assert.throws(() => parseResourceFields(['id:uuid']));
     assert.throws(() => parseResourceFields(['price:number', 'price:string']));
     assert.throws(() => parseResourceFields(['amount:decimal(2;3)']));
@@ -150,10 +154,12 @@ test('loads a versioned resource definition and reports invalid locations', () =
             profile: 'advanced',
             fields: ['sku:string!', 'status:enum(DRAFT|ACTIVE)'],
             indexes: ['sku+status'],
+            uniqueIndexes: ['sku'],
             relations: [{ type: 'belongsTo', target: 'customer', nullable: true, onDelete: 'SET NULL' }],
         }),
     );
     assert.deepEqual(loadResourceDefinition('product.resource.json', root).indexes, ['sku+status']);
+    assert.deepEqual(loadResourceDefinition('product.resource.json', root).uniqueIndexes, ['sku']);
     assert.equal(loadResourceDefinition('product.resource.json', root).relations[0].target, 'customer');
     fs.writeFileSync(definitionPath, JSON.stringify({ version: 1, fields: ['bad field'] }));
     assert.throws(() => loadResourceDefinition('product.resource.json', root), /fields\[0\]/);
@@ -205,6 +211,91 @@ test('generates coherent TypeORM one-to-many relations', async () => {
                 onDelete: 'RESTRICT',
             },
         ],
+    );
+});
+
+test('generates many-to-many join tables and association endpoints for TypeORM and Prisma', async () => {
+    for (const orm of ['typeorm', 'prisma']) {
+        const fixturePath = fs.mkdtempSync(path.join(os.tmpdir(), `nestgen-${orm}-many-to-many-`));
+        writeNestManifest(fixturePath);
+        fs.mkdirSync(path.join(fixturePath, 'src'), { recursive: true });
+        fs.writeFileSync(
+            path.join(fixturePath, 'src', 'app.module.ts'),
+            "import { Module } from '@nestjs/common';\n@Module({ imports: [] })\nexport class AppModule {}\n",
+        );
+        if (orm === 'prisma') {
+            fs.mkdirSync(path.join(fixturePath, 'prisma'));
+            fs.writeFileSync(
+                path.join(fixturePath, 'prisma', 'schema.prisma'),
+                'generator client {\n  provider = "prisma-client-js"\n}\n\ndatasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}\n',
+            );
+        }
+        await generateResource(fixturePath, {
+            name: 'role',
+            route: 'roles',
+            table: 'roles',
+            orm,
+            fields: parseResourceFields(['name:string!']),
+        });
+        await generateResource(fixturePath, {
+            name: 'user',
+            route: 'users',
+            table: 'users',
+            orm,
+            fields: parseResourceFields(['email:string!']),
+            relations: parseResourceRelations([{ type: 'manyToMany', target: 'role' }]),
+        });
+        const userRoot = path.join(fixturePath, 'src/app/user');
+        const userRepository = fs.readFileSync(path.join(userRoot, 'persistence/user.repository.ts'), 'utf8');
+        const userController = fs.readFileSync(path.join(userRoot, 'user.controller.ts'), 'utf8');
+        assert.match(userRepository, /async attachRoles\(id: string, targetId: string\)/);
+        assert.match(userRepository, /async detachRoles\(id: string, targetId: string\)/);
+        assert.match(userController, /@Post\(':id\/roles\/:targetId'\)/);
+        assert.match(userController, /@Delete\(':id\/roles\/:targetId'\)/);
+        if (orm === 'typeorm') {
+            const user = fs.readFileSync(path.join(userRoot, 'persistence/user.entity.ts'), 'utf8');
+            const role = fs.readFileSync(path.join(fixturePath, 'src/app/role/persistence/role.entity.ts'), 'utf8');
+            assert.match(user, /@ManyToMany\(\(\) => RoleEntity, \(role\) => role\.users\)/);
+            assert.match(user, /@JoinTable\(\{[\s\S]*name: 'join_users_roles_roles'/);
+            assert.match(user, /roles!: Relation<RoleEntity>\[\]/);
+            assert.doesNotMatch(user, /rolesId/);
+            assert.match(role, /@ManyToMany\(\(\) => UserEntity, \(user\) => user\.roles\)/);
+            assert.match(role, /users!: Relation<UserEntity>\[\]/);
+        } else {
+            const schema = fs.readFileSync(path.join(fixturePath, 'prisma/schema.prisma'), 'utf8');
+            assert.match(schema, /roles Role\[\] @relation\("RoleUserRoles"\)/);
+            assert.match(schema, /users User\[\] @relation\("RoleUserRoles"\)/);
+            assert.doesNotMatch(schema, /rolesId/);
+        }
+        await generateResource(fixturePath, {
+            name: 'membership',
+            route: 'memberships',
+            table: 'memberships',
+            orm,
+            fields: parseResourceFields(['scope:string']),
+            indexes: [{ fields: ['userId', 'roleId'], unique: true }],
+            relations: parseResourceRelations([
+                { type: 'belongsTo', target: 'user' },
+                { type: 'belongsTo', target: 'role' },
+            ]),
+        });
+        if (orm === 'typeorm') {
+            const membership = fs.readFileSync(
+                path.join(fixturePath, 'src/app/membership/persistence/membership.entity.ts'),
+                'utf8',
+            );
+            assert.match(
+                membership,
+                /@Index\('uq_memberships_userId_roleId', \['userId', 'roleId'\], \{ unique: true \}\)/,
+            );
+        } else {
+            const schema = fs.readFileSync(path.join(fixturePath, 'prisma/schema.prisma'), 'utf8');
+            assert.match(schema, /@@unique\(\[userId, roleId\], map: "uq_memberships_userId_roleId"\)/);
+        }
+    }
+    assert.throws(
+        () => parseResourceRelations([{ type: 'manyToMany', target: 'role', nullable: false }]),
+        /manyToMany ne définit ni nullable ni onDelete/,
     );
 });
 

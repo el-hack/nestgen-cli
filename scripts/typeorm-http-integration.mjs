@@ -176,6 +176,30 @@ try {
         fields: parseResourceFields(['email:string!']),
     });
     await generateResource(root, {
+        name: 'role',
+        route: 'roles',
+        table: 'roles',
+        fields: parseResourceFields(['name:string!']),
+    });
+    await generateResource(root, {
+        name: 'user',
+        route: 'users',
+        table: 'users',
+        fields: parseResourceFields(['email:string!']),
+        relations: parseResourceRelations([{ type: 'manyToMany', target: 'role' }]),
+    });
+    await generateResource(root, {
+        name: 'membership',
+        route: 'memberships',
+        table: 'memberships',
+        fields: parseResourceFields(['scope:string']),
+        indexes: [{ fields: ['userId', 'roleId'], unique: true }],
+        relations: parseResourceRelations([
+            { type: 'belongsTo', target: 'user' },
+            { type: 'belongsTo', target: 'role' },
+        ]),
+    });
+    await generateResource(root, {
         name: 'order',
         route: 'orders',
         table: 'orders',

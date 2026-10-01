@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import { AppModule } from './build/app.module.js';
 
 let step = 'initialisation de NestJS';
@@ -148,6 +149,24 @@ try {
     await api.delete('/customers/' + customer.body.id).expect(409);
     await api.delete('/orders/' + order.body.id).expect(204);
     await api.delete('/customers/' + customer.body.id).expect(204);
+    step = 'relation plusieurs-à-plusieurs';
+    const role = await api.post('/roles').send({ name: 'admin' }).expect(201);
+    const user = await api.post('/users').send({ email: 'user@example.test' }).expect(201);
+    await api.post(`/users/${user.body.id}/roles/${role.body.id}`).expect(204);
+    const database = app.get(DataSource);
+    const associations = await database.query('SELECT "userId", "roleId" FROM join_users_roles_roles');
+    assert.deepEqual(associations, [{ userId: user.body.id, roleId: role.body.id }]);
+    await api.delete(`/users/${user.body.id}/roles/${role.body.id}`).expect(204);
+    assert.deepEqual(await database.query('SELECT "userId", "roleId" FROM join_users_roles_roles'), []);
+    await api.get(`/roles/${role.body.id}`).expect(200);
+    const membership = await api
+        .post('/memberships')
+        .send({ userId: user.body.id, roleId: role.body.id, scope: 'admin' })
+        .expect(201);
+    await api.post('/memberships').send({ userId: user.body.id, roleId: role.body.id, scope: 'editor' }).expect(409);
+    await api.delete(`/memberships/${membership.body.id}`).expect(204);
+    await api.delete(`/users/${user.body.id}`).expect(204);
+    await api.delete(`/roles/${role.body.id}`).expect(204);
     step = 'création de la ressource';
     const created = await api
         .post('/catalog/products')

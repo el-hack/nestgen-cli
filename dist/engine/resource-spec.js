@@ -140,23 +140,25 @@ export function parseResourceFields(values) {
         throw new Error('Une ressource requiert au moins un champ métier.');
     return fields;
 }
-export function parseResourceIndexes(values, fields) {
+export function parseResourceIndexes(values, fields, uniqueValues = []) {
     const knownFields = new Set(fields.map((field) => field.name));
     const indexes = [
-        ...fields.filter((field) => field.indexed).map((field) => [field.name]),
-        ...values.map((value) => value.trim().split('+')),
+        ...fields.filter((field) => field.indexed).map((field) => ({ fields: [field.name], unique: false })),
+        ...values.map((value) => ({ fields: value.trim().split('+'), unique: false })),
+        ...uniqueValues.map((value) => ({ fields: value.trim().split('+'), unique: true })),
     ];
     const seen = new Set();
     return indexes.map((index) => {
-        if (index.length === 0 || index.some((field) => !namePattern.test(field) || !knownFields.has(field)))
-            throw new Error(`Index invalide : ${index.join('+')}. Chaque champ doit être déclaré dans la ressource.`);
-        if (new Set(index).size !== index.length)
-            throw new Error(`Index invalide : ${index.join('+')}. Un champ est répété.`);
-        const key = index.join('+');
+        if (index.fields.length === 0 ||
+            index.fields.some((field) => !namePattern.test(field) || !knownFields.has(field)))
+            throw new Error(`Index invalide : ${index.fields.join('+')}. Chaque champ doit être déclaré dans la ressource.`);
+        if (new Set(index.fields).size !== index.fields.length)
+            throw new Error(`Index invalide : ${index.fields.join('+')}. Un champ est répété.`);
+        const key = index.fields.join('+');
         if (seen.has(key))
             throw new Error(`Index déclaré plusieurs fois : ${key}.`);
         seen.add(key);
-        return { fields: index };
+        return index.unique ? { fields: index.fields, unique: true } : { fields: index.fields };
     });
 }
 export function parseResourceRelations(values) {
@@ -165,8 +167,8 @@ export function parseResourceRelations(values) {
         if (!value || typeof value !== 'object' || Array.isArray(value))
             throw new Error(`Relation invalide à l'index ${index}. Un objet est requis.`);
         const relation = value;
-        if (relation.type !== 'belongsTo')
-            throw new Error(`Relation invalide à l'index ${index}. Seul le type belongsTo est supporté.`);
+        if (relation.type !== 'belongsTo' && relation.type !== 'manyToMany')
+            throw new Error(`Relation invalide à l'index ${index}. Les types belongsTo et manyToMany sont supportés.`);
         if (typeof relation.target !== 'string' || !resourceNamePattern.test(relation.target))
             throw new Error(`Relation invalide à l'index ${index}. target doit être un nom de ressource valide.`);
         if (relation.field !== undefined && (typeof relation.field !== 'string' || !namePattern.test(relation.field)))
@@ -178,6 +180,8 @@ export function parseResourceRelations(values) {
             throw new Error(`Relation invalide à l'index ${index}. nullable doit être un booléen.`);
         if (relation.onDelete !== undefined && relation.onDelete !== 'RESTRICT' && relation.onDelete !== 'SET NULL')
             throw new Error(`Relation invalide à l'index ${index}. onDelete accepte RESTRICT ou SET NULL.`);
+        if (relation.type === 'manyToMany' && (relation.nullable !== undefined || relation.onDelete !== undefined))
+            throw new Error(`Relation invalide à l'index ${index}. manyToMany ne définit ni nullable ni onDelete.`);
         const nullable = relation.nullable ?? false;
         const onDelete = relation.onDelete ?? 'RESTRICT';
         if (onDelete === 'SET NULL' && !nullable)
@@ -189,7 +193,7 @@ export function parseResourceRelations(values) {
         if (field)
             seenFields.add(field);
         return {
-            type: 'belongsTo',
+            type: relation.type,
             target,
             field,
             inverse: relation.inverse ? `${relation.inverse[0].toLowerCase()}${relation.inverse.slice(1)}` : undefined,

@@ -354,24 +354,41 @@ export function loadResourceDefinition(file, projectRoot = process.cwd()) {
         }
     }
     const fields = parseResourceFields(value.fields);
+    if (value.relations !== undefined && !Array.isArray(value.relations))
+        throw new Error(`Définition de ressource invalide (${candidate}) : relations doit être un tableau.`);
+    let relations;
+    try {
+        relations = parseResourceRelations(value.relations ?? []);
+    } catch (error) {
+        throw new Error(`Définition de ressource invalide (${candidate}) : relations — ${error.message}`);
+    }
+    const relationFields = relationIndexFields(relations);
     if (
         value.indexes !== undefined &&
         (!Array.isArray(value.indexes) || value.indexes.some((index) => typeof index !== 'string'))
     )
         throw new Error(`Définition de ressource invalide (${candidate}) : indexes doit être un tableau de chaînes.`);
     try {
-        parseResourceIndexes(value.indexes ?? [], fields);
+        if (
+            value.uniqueIndexes !== undefined &&
+            (!Array.isArray(value.uniqueIndexes) || value.uniqueIndexes.some((index) => typeof index !== 'string'))
+        )
+            throw new Error(
+                `Définition de ressource invalide (${candidate}) : uniqueIndexes doit être un tableau de chaînes.`,
+            );
+        parseResourceIndexes(value.indexes ?? [], [...fields, ...relationFields], value.uniqueIndexes ?? []);
     } catch (error) {
         throw new Error(`Définition de ressource invalide (${candidate}) : indexes — ${error.message}`);
     }
-    if (value.relations !== undefined && !Array.isArray(value.relations))
-        throw new Error(`Définition de ressource invalide (${candidate}) : relations doit être un tableau.`);
-    try {
-        parseResourceRelations(value.relations ?? []);
-    } catch (error) {
-        throw new Error(`Définition de ressource invalide (${candidate}) : relations — ${error.message}`);
-    }
     return value;
+}
+
+function relationIndexFields(relations) {
+    return relations
+        .filter((relation) => relation.type === 'belongsTo')
+        .map((relation) => ({
+            name: `${relation.field ?? relation.target.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())}Id`,
+        }));
 }
 
 async function runResourceGeneration(parsed) {
@@ -383,11 +400,13 @@ async function runResourceGeneration(parsed) {
     const orm = validateOrm(parsed.options.orm ?? definition.orm ?? config.orm);
     const profile = parseArchitectureProfile(parsed.options.profile ?? definition.profile ?? config.profile);
     const fields = parseResourceFields(fieldValues);
+    const relations = parseResourceRelations(definition.relations ?? []);
+    const relationFields = relationIndexFields(relations);
     const indexes = parseResourceIndexes(
         parsed.options.indexes?.split(',').filter(Boolean) ?? definition.indexes ?? [],
-        fields,
+        [...fields, ...relationFields],
+        definition.uniqueIndexes ?? [],
     );
-    const relations = parseResourceRelations(definition.relations ?? []);
     const route = parsed.options.route ?? definition.route ?? `${name}s`;
     const table = parsed.options.table ?? definition.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
