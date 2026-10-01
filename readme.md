@@ -101,6 +101,18 @@ Fields accepted by `resource` are `string`, `number`, `integer`, `decimal(precis
 
 `integer` maps to PostgreSQL `integer` / Prisma `Int` and is validated with `@IsInt()`. `decimal(precision;scale)` maps to PostgreSQL `numeric(precision, scale)` / Prisma `Decimal @db.Decimal(precision, scale)` and is validated as a decimal string. `enum(...)` maps to a PostgreSQL enum / a generated Prisma enum and is validated against its declared values.
 
+## Contraintes et index métier
+
+Ajoutez des contraintes après le type entre accolades, séparées par `;` : `length` pour une chaîne, `min` et `max` pour un nombre ou un entier, `default` pour une valeur par défaut compatible, et `index` pour un index simple. Les index composites sont déclarés avec `--indexes`, chaque colonne étant séparée par `+`.
+
+```bash
+nestgen resource product \
+  --fields sku:string{length=64;index}!,title:string{length=120},quantity:integer{min=0;max=100;default=0},status:enum(DRAFT|ACTIVE){default=DRAFT} \
+  --indexes sku+status
+```
+
+NestGen refuse les combinaisons incompatibles, les bornes inversées et les index qui ciblent un champ absent. Les contraintes sont reflétées dans les DTOs, OpenAPI lorsque Swagger est installé, et les schémas TypeORM ou Prisma. Les index reçoivent un nom déterministe fondé sur la table et leurs colonnes, y compris lorsque PostgreSQL impose une limite de longueur.
+
 On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
 `null` clears only nullable fields and is rejected for other fields. Values such as
 `false`, `0` and an empty string are preserved when valid for the field type.

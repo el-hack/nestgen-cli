@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { inspectProject } from './nestjs-generator/features/preflight.mjs';
 import { generateModule } from './dist/engine/module-generator.js';
 import { generateResource } from './dist/engine/resource-generator.js';
-import { parseResourceFields } from './dist/engine/resource-spec.js';
+import { parseResourceFields, parseResourceIndexes } from './dist/engine/resource-spec.js';
 import { configFileName, defaultConfig, loadConfigIfPresent, writeConfig } from './dist/engine/project-config.js';
 import { parseArchitectureProfile } from './dist/engine/architecture-profile.js';
 
@@ -90,6 +90,7 @@ export function parseCliArgs(args) {
         orm: undefined,
         profile: undefined,
         packageManager: undefined,
+        indexes: undefined,
         noInteractive: false,
         quiet: false,
         verbose: false,
@@ -112,6 +113,8 @@ export function parseCliArgs(args) {
         else if (argument.startsWith('--package-manager=')) options.packageManager = argument.slice(18);
         else if (argument === '--fields') options.fields = args[++index];
         else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
+        else if (argument === '--indexes') options.indexes = args[++index];
+        else if (argument.startsWith('--indexes=')) options.indexes = argument.slice(10);
         else if (argument === '--route') options.route = args[++index];
         else if (argument.startsWith('--route=')) options.route = argument.slice(8);
         else if (argument === '--table') options.table = args[++index];
@@ -332,15 +335,18 @@ async function runResourceGeneration(parsed) {
     const orm = validateOrm(parsed.options.orm ?? config.orm);
     const profile = parseArchitectureProfile(parsed.options.profile ?? config.profile);
     const fields = parseResourceFields(parsed.options.fields.split(',').filter(Boolean));
+    const indexes = parseResourceIndexes(parsed.options.indexes?.split(',').filter(Boolean) ?? [], fields);
     const route = parsed.options.route ?? `${name}s`;
     const table = parsed.options.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
-        console.log(JSON.stringify({ operation: 'resource', name, route, table, orm, profile, fields }, null, 2));
+        console.log(
+            JSON.stringify({ operation: 'resource', name, route, table, orm, profile, fields, indexes }, null, 2),
+        );
         return;
     }
-    await generateResource(process.cwd(), { name, route, table, fields, orm, profile });
+    await generateResource(process.cwd(), { name, route, table, fields, indexes, orm, profile });
 }
 
 function printUsage() {
@@ -349,7 +355,8 @@ function printUsage() {
   config init|show               Gère nestgen.config.json
   doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
   --package-manager <pm>        Définit le package manager du config init
-  --dry-run                    Affiche le plan sans écrire\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
+  --dry-run                    Affiche le plan sans écrire
+  --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
     );
 }
 

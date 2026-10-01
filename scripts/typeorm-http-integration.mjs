@@ -132,7 +132,7 @@ try {
         route: 'catalog/products',
         table: 'catalog_products',
         fields: parseResourceFields([
-            'sku:string!',
+            'sku:string{length=64;index}!',
             'price:number',
             'published:boolean',
             'releasedAt:date?',
@@ -140,9 +140,12 @@ try {
             'quantity:integer?',
             'amount:decimal(12;2)',
             'status:enum(DRAFT|ACTIVE)',
+            'stock:integer{min=0;max=100;default=0}',
+            'category:string{length=32;index;default=general}',
             'enabled:boolean?',
             'reference:uuid?',
         ]),
+        indexes: [{ fields: ['sku', 'status'] }],
         profile: 'advanced',
     });
     await generateResource(root, {
@@ -150,7 +153,7 @@ try {
         route: 'simple-products',
         table: 'simple_products',
         fields: parseResourceFields([
-            'sku:string!',
+            'sku:string{length=64;index}!',
             'price:number',
             'published:boolean',
             'releasedAt:date?',
@@ -158,9 +161,12 @@ try {
             'quantity:integer?',
             'amount:decimal(12;2)',
             'status:enum(DRAFT|ACTIVE)',
+            'stock:integer{min=0;max=100;default=0}',
+            'category:string{length=32;index;default=general}',
             'enabled:boolean?',
             'reference:uuid?',
         ]),
+        indexes: [{ fields: ['sku', 'status'] }],
         profile: 'simple',
     });
     await generateModule(root, 'audit-entry', 'typeorm');

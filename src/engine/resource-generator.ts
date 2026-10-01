@@ -5,7 +5,7 @@ import { availableFeatureDirectory, projectPath } from './project-path.js';
 import { applyFileChanges, FileChange } from './file-transaction.js';
 import { ArchitectureProfile, parseArchitectureProfile } from './architecture-profile.js';
 import { Orm, registerModuleInAppModule } from './module-generator.js';
-import { prismaType, ResourceField, typescriptType } from './resource-spec.js';
+import { prismaType, ResourceField, ResourceIndex, typescriptType } from './resource-spec.js';
 
 type Options = {
     name: string;
@@ -14,6 +14,7 @@ type Options = {
     table: string;
     orm?: Orm;
     profile?: ArchitectureProfile;
+    indexes?: ResourceIndex[];
 };
 
 function pascal(value: string): string {
@@ -29,6 +30,43 @@ function enumName(className: string, field: ResourceField): string {
 
 function enumValues(field: ResourceField): string {
     return field.enumValues!.map((value) => `'${value}'`).join(', ');
+}
+
+function stableSuffix(value: string): string {
+    let hash = 2166136261;
+    for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    return (hash >>> 0).toString(36);
+}
+
+function indexName(table: string, fields: string[]): string {
+    const value = `idx_${table}_${fields.join('_')}`;
+    return value.length <= 63 ? value : `${value.slice(0, 54)}_${stableSuffix(value)}`;
+}
+
+function resolvedIndexes(fields: ResourceField[], indexes: ResourceIndex[] | undefined): ResourceIndex[] {
+    const resolved = [
+        ...fields.filter((field) => field.indexed).map((field) => ({ fields: [field.name] })),
+        ...(indexes ?? []),
+    ];
+    const seen = new Set<string>();
+    return resolved.filter((index) => {
+        const key = index.fields.join('+');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function defaultLiteral(field: ResourceField): string {
+    if (typeof field.defaultValue === 'string') return `'${field.defaultValue.replaceAll("'", "''")}'`;
+    return String(field.defaultValue);
+}
+
+function prismaDefault(field: ResourceField): string {
+    if (field.defaultValue === undefined) return '';
+    if (field.type === 'string') return ` @default(${JSON.stringify(field.defaultValue)})`;
+    if (field.type === 'enum') return ` @default(${field.defaultValue})`;
+    return ` @default(${field.defaultValue})`;
 }
 
 function entityColumn(field: ResourceField, className: string): string {
@@ -52,6 +90,8 @@ function entityColumn(field: ResourceField, className: string): string {
     if (field.type === 'decimal') options.push(`precision: ${field.precision}`, `scale: ${field.scale}`);
     if (field.type === 'enum')
         options.push(`enum: [${enumValues(field)}]`, `enumName: '${enumName(className, field)}'`);
+    if (field.length !== undefined) options.push(`length: ${field.length}`);
+    if (field.defaultValue !== undefined) options.push(`default: ${defaultLiteral(field)}`);
     if (field.unique) options.push('unique: true');
     return `    @Column({ ${options.join(', ')} })\n    ${field.name}${field.nullable ? '?' : '!'}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`;
 }
@@ -79,6 +119,9 @@ function validationDecorators(field: ResourceField, optional: boolean): string[]
                         ? '@IsUUID()'
                         : '@IsString()',
     );
+    if (field.length !== undefined) decorators.push(`@MaxLength(${field.length})`);
+    if (field.min !== undefined) decorators.push(`@Min(${field.min})`);
+    if (field.max !== undefined) decorators.push(`@Max(${field.max})`);
     return decorators;
 }
 
@@ -103,6 +146,10 @@ function swaggerProperty(field: ResourceField, optional: boolean): string {
             "description: 'Nombre décimal transmis sous forme de chaîne pour préserver sa précision.'",
         );
     if (field.type === 'enum') options.push(`enum: [${enumValues(field)}]`);
+    if (field.length !== undefined) options.push(`maxLength: ${field.length}`);
+    if (field.min !== undefined) options.push(`minimum: ${field.min}`);
+    if (field.max !== undefined) options.push(`maximum: ${field.max}`);
+    if (field.defaultValue !== undefined) options.push(`default: ${defaultLiteral(field)}`);
     if (field.unique) options.push("description: 'Valeur unique.'");
     return `@${required ? 'ApiProperty' : 'ApiPropertyOptional'}({ ${options.join(', ')} })`;
 }
@@ -117,7 +164,7 @@ function swaggerImports(fields: ResourceField[], optional: boolean): string {
 function dtoFields(fields: ResourceField[], optional: boolean, swagger = false): string {
     return fields
         .map((field) => {
-            const isOptional = optional || field.nullable;
+            const isOptional = optional || field.nullable || field.defaultValue !== undefined;
             const type = field.type === 'date' ? 'string' : typescriptType(field);
             return `${swagger ? `    ${swaggerProperty(field, isOptional)}\n` : ''}${validationDecorators(
                 field,
@@ -131,7 +178,9 @@ function dtoFields(fields: ResourceField[], optional: boolean, swagger = false):
 
 function validationImports(fields: ResourceField[], optional: boolean): string {
     const names = fields.flatMap((field) =>
-        validationDecorators(field, optional).map((decorator) => decorator.slice(1, decorator.indexOf('('))),
+        validationDecorators(field, optional || field.defaultValue !== undefined).map((decorator) =>
+            decorator.slice(1, decorator.indexOf('(')),
+        ),
     );
     return [...new Set(names)].sort().join(', ');
 }
@@ -162,7 +211,7 @@ function applicationContractFields(fields: ResourceField[], optional: boolean): 
     return fields
         .map(
             (field) =>
-                `    ${field.name}${optional || field.nullable ? '?' : ''}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`,
+                `    ${field.name}${optional || field.nullable || field.defaultValue !== undefined ? '?' : ''}: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`,
         )
         .join('\n');
 }
@@ -349,15 +398,21 @@ function prismaModelFields(className: string, fields: ResourceField[]): string {
     return fields
         .map((field) => {
             if (field.type === 'enum')
-                return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}`;
+                return `  ${field.name} ${enumName(className, field)}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}${prismaDefault(field)}`;
             if (field.type === 'decimal')
-                return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}`;
-            return `  ${field.name} ${prismaType(field)}`;
+                return `  ${field.name} ${prismaType({ ...field, nullable: false, unique: false })}${field.nullable ? '?' : ''} @db.Decimal(${field.precision}, ${field.scale})${field.unique ? ' @unique' : ''}${prismaDefault(field)}`;
+            return `  ${field.name} ${prismaType(field)}${prismaDefault(field)}`;
         })
         .join('\n');
 }
 
-function prismaSchema(source: string, className: string, table: string, fields: ResourceField[]): string {
+function prismaSchema(
+    source: string,
+    className: string,
+    table: string,
+    fields: ResourceField[],
+    indexes: ResourceIndex[],
+): string {
     if (new RegExp(`\\bmodel\\s+${className}\\b`).test(source))
         throw new Error(`Le modèle Prisma ${className} existe déjà.`);
     const definitions = fields
@@ -367,7 +422,10 @@ function prismaSchema(source: string, className: string, table: string, fields: 
             if (new RegExp(`\\benum\\s+${name}\\b`).test(source)) throw new Error(`L'enum Prisma ${name} existe déjà.`);
             return `enum ${name} {\n${field.enumValues!.map((value) => `  ${value}`).join('\n')}\n}`;
         });
-    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}\n\n  @@map("${table}")\n}\n`;
+    const indexDefinitions = indexes
+        .map((index) => `  @@index([${index.fields.join(', ')}], map: "${indexName(table, index.fields)}")`)
+        .join('\n');
+    return `${source.trimEnd()}${definitions.length ? `\n\n${definitions.join('\n\n')}` : ''}\n\nmodel ${className} {\n  id String @id @default(uuid())\n${prismaModelFields(className, fields)}${indexDefinitions ? `\n\n${indexDefinitions}` : ''}\n\n  @@map("${table}")\n}\n`;
 }
 
 function prismaRuntime(projectRoot: string): FileChange[] {
@@ -470,9 +528,16 @@ function featureFiles(
     table: string,
     profile: ArchitectureProfile,
     swagger: boolean,
+    indexes: ResourceIndex[],
 ): Map<string, string> {
     const advanced = profile === 'advanced';
     const entityProperties = fields.map((field) => entityColumn(field, className)).join('\n\n');
+    const entityIndexes = indexes
+        .map(
+            (index) =>
+                `@Index('${indexName(table, index.fields)}', [${index.fields.map((field) => `'${field}'`).join(', ')}])`,
+        )
+        .join('\n');
     const fieldAssignments = propertyMap(fields);
     const domainProperties = fields
         .map((field) => `    ${field.name}!: ${typescriptType(field)}${field.nullable ? ' | null' : ''};`)
@@ -493,7 +558,7 @@ function featureFiles(
     );
     files.set(
         'persistence/' + name + '.entity.ts',
-        `import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';\n\n@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`,
+        `import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';\n\n${entityIndexes ? `${entityIndexes}\n` : ''}@Entity({ name: '${table}' })\nexport class ${className}Entity {\n    @PrimaryGeneratedColumn('uuid')\n    id!: string;\n\n${entityProperties}\n}\n`,
     );
     if (swagger) {
         const queryPath = 'dto/list-' + name + '.query.ts';
@@ -611,6 +676,7 @@ export async function generateResource(projectRoot: string, options: Options): P
     const name = options.name.trim().toLowerCase().replaceAll('_', '-');
     if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) throw new Error('Nom de ressource invalide.');
     const className = pascal(name);
+    const indexes = resolvedIndexes(options.fields, options.indexes);
     const project = inspectProject(projectRoot, orm, { cqrs: false });
     projectRoot = project.root;
     availableFeatureDirectory(projectRoot, name);
@@ -632,13 +698,19 @@ export async function generateResource(projectRoot: string, options: Options): P
         }));
         changes.push({
             path: 'prisma/schema.prisma',
-            content: prismaSchema(fs.readFileSync(schemaPath, 'utf8'), className, options.table, options.fields),
+            content: prismaSchema(
+                fs.readFileSync(schemaPath, 'utf8'),
+                className,
+                options.table,
+                options.fields,
+                indexes,
+            ),
             operation: 'replace',
         });
         changes.push(...prismaRuntime(projectRoot));
         changes.push({
             path: `src/app/${name}/resource.json`,
-            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+            content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
             operation: 'create',
         });
         changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
@@ -652,7 +724,16 @@ export async function generateResource(projectRoot: string, options: Options): P
     const swagger = Boolean(
         manifest.dependencies?.['@nestjs/swagger'] ?? manifest.devDependencies?.['@nestjs/swagger'],
     );
-    const files = featureFiles(name, className, options.fields, options.route, options.table, profile, swagger);
+    const files = featureFiles(
+        name,
+        className,
+        options.fields,
+        options.route,
+        options.table,
+        profile,
+        swagger,
+        indexes,
+    );
     const restTest = generatedRestTest(name, className, options.fields, options.route);
     const e2eSupport = e2eSupportFiles(projectRoot);
     const appModule = registerModuleInAppModule(
@@ -670,7 +751,7 @@ export async function generateResource(projectRoot: string, options: Options): P
     changes.push(...[...e2eSupport].map(([file, content]) => ({ path: file, content, operation: 'create' as const })));
     changes.push({
         path: `src/app/${name}/resource.json`,
-        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields }, null, 2)}\n`,
+        content: `${JSON.stringify({ name, route: options.route, table: options.table, orm, profile, fields: options.fields, indexes }, null, 2)}\n`,
         operation: 'create',
     });
     changes.push({ path: 'src/app.module.ts', content: appModule, operation: 'replace' });
