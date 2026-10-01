@@ -1,11 +1,36 @@
-const fieldPattern = /^([a-z][a-z0-9]*):(string|number|boolean|date|uuid)(\?)?(!)?$/i;
+const namePattern = /^[a-z][a-z0-9]*$/i;
+const enumValuePattern = /^[A-Z][A-Z0-9_]*$/;
+const basicTypes = new Set(['string', 'number', 'integer', 'boolean', 'date', 'uuid']);
+function parseType(rawType, value) {
+    const basicType = rawType.toLowerCase();
+    if (basicTypes.has(basicType))
+        return { type: basicType };
+    const decimal = /^decimal\((\d+);(\d+)\)$/i.exec(rawType);
+    if (decimal) {
+        const precision = Number(decimal[1]);
+        const scale = Number(decimal[2]);
+        if (precision < 1 || precision > 1000 || scale > precision)
+            throw new Error(`Précision décimale invalide : ${value}. La précision doit être entre 1 et 1000, et l'échelle ne peut pas la dépasser.`);
+        return { type: 'decimal', precision, scale };
+    }
+    const enumeration = /^enum\(([^)]+)\)$/i.exec(rawType);
+    if (enumeration) {
+        const enumValues = enumeration[1].split('|');
+        if (enumValues.some((entry) => !enumValuePattern.test(entry)) || new Set(enumValues).size !== enumValues.length)
+            throw new Error(`Enum invalide : ${value}. Les valeurs doivent être uniques, en MAJUSCULES, et séparées par |.`);
+        return { type: 'enum', enumValues };
+    }
+    throw new Error(`Champ invalide : ${value}. Format attendu : nom:type, decimal(précision;échelle) ou enum(VALEUR|VALEUR), avec ? (nullable) ou ! (unique).`);
+}
 export function parseResourceFields(values) {
     const names = new Set();
     const fields = values.map((value) => {
-        const match = fieldPattern.exec(value.trim());
+        const match = /^([^:]+):(.+?)(\?)?(!)?$/.exec(value.trim());
         if (!match)
             throw new Error(`Champ invalide : ${value}. Format attendu : nom:type, avec ? (nullable) ou ! (unique).`);
         const [, rawName, rawType, optional, unique] = match;
+        if (!namePattern.test(rawName))
+            throw new Error(`Nom de champ invalide : ${rawName}.`);
         const name = `${rawName[0].toLowerCase()}${rawName.slice(1)}`;
         if (name === 'id')
             throw new Error('Le champ id est géré par NestGen et ne doit pas être déclaré.');
@@ -14,7 +39,7 @@ export function parseResourceFields(values) {
         names.add(name);
         return {
             name,
-            type: rawType.toLowerCase(),
+            ...parseType(rawType, value),
             nullable: Boolean(optional),
             unique: Boolean(unique),
         };
@@ -24,7 +49,7 @@ export function parseResourceFields(values) {
     return fields;
 }
 export function typescriptType(field) {
-    return field.type === 'number'
+    return field.type === 'number' || field.type === 'integer'
         ? 'number'
         : field.type === 'boolean'
             ? 'boolean'
@@ -35,10 +60,14 @@ export function typescriptType(field) {
 export function prismaType(field) {
     const type = field.type === 'number'
         ? 'Float'
-        : field.type === 'boolean'
-            ? 'Boolean'
-            : field.type === 'date'
-                ? 'DateTime'
-                : 'String';
+        : field.type === 'integer'
+            ? 'Int'
+            : field.type === 'decimal'
+                ? 'Decimal'
+                : field.type === 'boolean'
+                    ? 'Boolean'
+                    : field.type === 'date'
+                        ? 'DateTime'
+                        : 'String';
     return `${type}${field.nullable ? '?' : ''}${field.unique ? ' @unique' : ''}`;
 }

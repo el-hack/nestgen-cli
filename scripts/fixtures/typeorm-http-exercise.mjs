@@ -38,7 +38,10 @@ try {
             await api[method](route + '/not-a-uuid').expect(400);
             await api[method](route + '/00000000-0000-4000-8000-000000000001').expect(404);
         }
-        const sample = await api.post(route).send({ sku: 'uuid-check', price: 1, published: false }).expect(201);
+        const sample = await api
+            .post(route)
+            .send({ sku: 'uuid-check', price: 1, amount: '1.00', status: 'DRAFT', published: false })
+            .expect(201);
         await api.get(route + '/' + sample.body.id).expect(200);
         await api
             .patch(route + '/' + sample.body.id)
@@ -47,7 +50,7 @@ try {
         await api.delete(route + '/' + sample.body.id).expect(204);
 
         step = 'champs absents, nullables et valeurs falsy : ' + route;
-        const required = { sku: 'partial-check', price: 12, published: true };
+        const required = { sku: 'partial-check', price: 12, amount: '12.34', status: 'DRAFT', published: true };
         for (const field of Object.keys(required)) {
             await api
                 .post(route)
@@ -109,18 +112,42 @@ try {
         const omittedRead = await api.get(route + '/' + omitted.body.id).expect(200);
         assert.deepEqual(omittedRead.body, { id: omitted.body.id, ...required, ...nulls });
         await api.delete(route + '/' + omitted.body.id).expect(204);
+
+        await api
+            .post(route)
+            .send({ ...required, amount: 'not-a-decimal' })
+            .expect(400);
+        await api
+            .post(route)
+            .send({ ...required, status: 'UNKNOWN' })
+            .expect(400);
+        await api
+            .post(route)
+            .send({ ...required, quantity: 1.5 })
+            .expect(400);
     }
     step = 'création de la ressource';
     const created = await api
         .post('/catalog/products')
-        .send({ sku: 'sku-1', price: 12.5, published: true })
+        .send({ sku: 'sku-1', price: 12.5, amount: '1234567890.12', status: 'DRAFT', published: true })
         .expect(201);
-    if (!created.body.id || created.body.price !== 12.5)
+    if (
+        !created.body.id ||
+        created.body.price !== 12.5 ||
+        created.body.amount !== '1234567890.12' ||
+        created.body.status !== 'DRAFT'
+    )
         throw new Error('La création TypeORM ne retourne pas la ressource persistée.');
     step = 'validation HTTP 400';
-    await api.post('/catalog/products').send({ sku: 'sku-2', price: 'invalid', published: true }).expect(400);
+    await api
+        .post('/catalog/products')
+        .send({ sku: 'sku-2', price: 'invalid', amount: '12.34', status: 'DRAFT', published: true })
+        .expect(400);
     step = 'conflit HTTP 409';
-    await api.post('/catalog/products').send({ sku: 'sku-1', price: 15, published: false }).expect(409);
+    await api
+        .post('/catalog/products')
+        .send({ sku: 'sku-1', price: 15, amount: '12.34', status: 'ACTIVE', published: false })
+        .expect(409);
     step = 'borne de pagination';
     await api.get('/catalog/products?limit=101').expect(400);
     step = 'lecture paginée';
@@ -130,11 +157,12 @@ try {
     step = 'mise à jour';
     await api
         .patch('/catalog/products/' + created.body.id)
-        .send({ price: 20 })
+        .send({ price: 20, amount: '9876543210.98', status: 'ACTIVE' })
         .expect(200);
     step = 'lecture après mise à jour';
     const found = await api.get('/catalog/products/' + created.body.id).expect(200);
-    if (found.body.price !== 20) throw new Error('La mise à jour TypeORM n’est pas persistée.');
+    if (found.body.price !== 20 || found.body.amount !== '9876543210.98' || found.body.status !== 'ACTIVE')
+        throw new Error('La mise à jour TypeORM n’est pas persistée sans perte de précision.');
     step = 'suppression';
     await api.delete('/catalog/products/' + created.body.id).expect(204);
     step = 'vérification HTTP 404';

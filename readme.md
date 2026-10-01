@@ -4,7 +4,7 @@
 [![CI](https://github.com/el-hack/nestgen-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/el-hack/nestgen-cli/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/nestgen-cli)](LICENSE)
 
-NestGen CLI generates NestJS project scaffolding and TypeORM resources. The canonical package is [`nestgen-cli`](https://www.npmjs.com/package/nestgen-cli); the canonical repository is [`el-hack/nestgen-cli`](https://github.com/el-hack/nestgen-cli).
+NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources. The canonical package is [`nestgen-cli`](https://www.npmjs.com/package/nestgen-cli); the canonical repository is [`el-hack/nestgen-cli`](https://github.com/el-hack/nestgen-cli).
 
 ## Supported contract
 
@@ -97,7 +97,9 @@ nestgen config show
 nestgen doctor
 ```
 
-Fields accepted by `resource` are `string`, `number`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field:
+Fields accepted by `resource` are `string`, `number`, `integer`, `decimal(precision;scale)`, `enum(VALUE|VALUE)`, `boolean`, `date` and `uuid`. Add `?` for a nullable field and `!` for a unique field. A decimal uses a semicolon between precision and scale so a field list can still be separated by commas. Decimals are exposed as JSON strings to preserve their database precision; enums use uppercase values separated by `|`.
+
+`integer` maps to PostgreSQL `integer` / Prisma `Int` and is validated with `@IsInt()`. `decimal(precision;scale)` maps to PostgreSQL `numeric(precision, scale)` / Prisma `Decimal @db.Decimal(precision, scale)` and is validated as a decimal string. `enum(...)` maps to a PostgreSQL enum / a generated Prisma enum and is validated against its declared values.
 
 On creation, non-nullable fields are required. On PATCH, omitted fields are preserved;
 `null` clears only nullable fields and is rejected for other fields. Values such as
@@ -105,7 +107,7 @@ On creation, non-nullable fields are required. On PATCH, omitted fields are pres
 
 ```bash
 nestgen resource invoice \
-  --fields number:string!,amount:number,paid:boolean,dueAt:date? \
+  --fields number:string!,lineCount:integer,amount:decimal(12;2),status:enum(DRAFT|ISSUED),paid:boolean,dueAt:date? \
   --route billing/invoices \
   --table billing_invoices
 ```

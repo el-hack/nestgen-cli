@@ -345,11 +345,11 @@ async function runResourceGeneration(parsed) {
 
 function printUsage() {
     console.log(
-        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM
+        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
   config init|show               Gère nestgen.config.json
   doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
   --package-manager <pm>        Définit le package manager du config init
-  --dry-run                    Affiche le plan sans écrire`,
+  --dry-run                    Affiche le plan sans écrire\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
     );
 }
 

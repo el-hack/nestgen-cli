@@ -93,7 +93,15 @@ try {
         route: 'products',
         table: 'products',
         orm: 'prisma',
-        fields: parseResourceFields(['sku:string!', 'price:number', 'published:boolean', 'releasedAt:date?']),
+        fields: parseResourceFields([
+            'sku:string!',
+            'price:number',
+            'quantity:integer',
+            'amount:decimal(12;2)',
+            'status:enum(DRAFT|ACTIVE)',
+            'published:boolean',
+            'releasedAt:date?',
+        ]),
     });
     run('docker', [
         'run',
@@ -123,7 +131,7 @@ try {
     run('npx', ['tsc', '--noEmit']);
     fs.writeFileSync(
         path.join(root, 'persist.mjs'),
-        "import 'reflect-metadata';\nimport { ConflictException, NotFoundException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { ProductRepository } from './build/app/product/persistence/product.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(ProductRepository); const created = await repository.create({ sku: 'integration-sku', price: 12.5, published: true }); const found = await repository.findOne(created.id); if (found.price !== 12.5) throw new Error('persisted resource was not found'); const updated = await repository.update(created.id, { price: 20 }); if (updated.price !== 20) throw new Error('persisted resource was not updated'); await repository.create({ sku: 'integration-sku', price: 1, published: false }).then(() => { throw new Error('duplicate resource was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await repository.remove(created.id); await repository.findOne(created.id).then(() => { throw new Error('deleted resource was found'); }, (error) => { if (!(error instanceof NotFoundException)) throw error; }); } finally { await app.close(); }\n",
+        "import 'reflect-metadata';\nimport { ConflictException, NotFoundException } from '@nestjs/common';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './build/app.module.js';\nimport { ProductRepository } from './build/app/product/persistence/product.repository.js';\nconst app = await NestFactory.createApplicationContext(AppModule, { logger: false });\ntry { const repository = app.get(ProductRepository); const created = await repository.create({ sku: 'integration-sku', price: 12.5, quantity: 7, amount: '1234567890.12', status: 'DRAFT', published: true }); const found = await repository.findOne(created.id); if (found.price !== 12.5 || found.quantity !== 7 || found.amount !== '1234567890.12' || found.status !== 'DRAFT') throw new Error('persisted rich resource was not found without precision loss'); const updated = await repository.update(created.id, { price: 20, quantity: 8, amount: '9876543210.98', status: 'ACTIVE' }); if (updated.price !== 20 || updated.quantity !== 8 || updated.amount !== '9876543210.98' || updated.status !== 'ACTIVE') throw new Error('persisted rich resource was not updated'); await repository.create({ sku: 'integration-sku', price: 1, quantity: 1, amount: '1.00', status: 'DRAFT', published: false }).then(() => { throw new Error('duplicate resource was created'); }, (error) => { if (!(error instanceof ConflictException)) throw error; }); await repository.remove(created.id); await repository.findOne(created.id).then(() => { throw new Error('deleted resource was found'); }, (error) => { if (!(error instanceof NotFoundException)) throw error; }); } finally { await app.close(); }\n",
     );
     for (const entry of fs.readdirSync(path.join(root, 'src'), { recursive: true, withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name === 'app.module.ts') continue;
