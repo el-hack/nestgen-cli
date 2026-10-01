@@ -91,6 +91,7 @@ export function parseCliArgs(args) {
         profile: undefined,
         packageManager: undefined,
         indexes: undefined,
+        definitionFile: undefined,
         noInteractive: false,
         quiet: false,
         verbose: false,
@@ -115,6 +116,8 @@ export function parseCliArgs(args) {
         else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
         else if (argument === '--indexes') options.indexes = args[++index];
         else if (argument.startsWith('--indexes=')) options.indexes = argument.slice(10);
+        else if (argument === '--file') options.definitionFile = args[++index];
+        else if (argument.startsWith('--file=')) options.definitionFile = argument.slice(7);
         else if (argument === '--route') options.route = args[++index];
         else if (argument.startsWith('--route=')) options.route = argument.slice(8);
         else if (argument === '--table') options.table = args[++index];
@@ -328,16 +331,57 @@ async function runModuleGeneration(parsed) {
     await generateModule(process.cwd(), moduleName, orm);
 }
 
+export function loadResourceDefinition(file, projectRoot = process.cwd()) {
+    const candidate = path.resolve(projectRoot, String(file ?? ''));
+    if (!candidate.startsWith(`${path.resolve(projectRoot)}${path.sep}`))
+        throw new Error('--file doit désigner un fichier situé dans le projet courant.');
+    let value;
+    try {
+        value = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+    } catch (error) {
+        throw new Error(`Définition de ressource invalide (${candidate}) : ${error.message}`);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error(`Définition de ressource invalide (${candidate}) : un objet JSON est requis.`);
+    if (value.version !== 1) throw new Error(`Définition de ressource invalide (${candidate}) : version 1 requise.`);
+    if (!Array.isArray(value.fields) || value.fields.some((field) => typeof field !== 'string'))
+        throw new Error(`Définition de ressource invalide (${candidate}) : fields doit être un tableau de chaînes.`);
+    for (const [index, field] of value.fields.entries()) {
+        try {
+            parseResourceFields([field]);
+        } catch (error) {
+            throw new Error(`Définition de ressource invalide (${candidate}) : fields[${index}] — ${error.message}`);
+        }
+    }
+    const fields = parseResourceFields(value.fields);
+    if (
+        value.indexes !== undefined &&
+        (!Array.isArray(value.indexes) || value.indexes.some((index) => typeof index !== 'string'))
+    )
+        throw new Error(`Définition de ressource invalide (${candidate}) : indexes doit être un tableau de chaînes.`);
+    try {
+        parseResourceIndexes(value.indexes ?? [], fields);
+    } catch (error) {
+        throw new Error(`Définition de ressource invalide (${candidate}) : indexes — ${error.message}`);
+    }
+    return value;
+}
+
 async function runResourceGeneration(parsed) {
-    const name = validateModuleName(parsed.positionals[0] ?? '');
-    if (!parsed.options.fields) throw new Error('resource requiert --fields champ:type[,champ:type].');
+    const definition = parsed.options.definitionFile ? loadResourceDefinition(parsed.options.definitionFile) : {};
+    const name = validateModuleName(parsed.positionals[0] ?? definition.name ?? '');
+    const fieldValues = parsed.options.fields?.split(',').filter(Boolean) ?? definition.fields;
+    if (!fieldValues) throw new Error('resource requiert --fields ou --file avec fields.');
     const config = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
-    const orm = validateOrm(parsed.options.orm ?? config.orm);
-    const profile = parseArchitectureProfile(parsed.options.profile ?? config.profile);
-    const fields = parseResourceFields(parsed.options.fields.split(',').filter(Boolean));
-    const indexes = parseResourceIndexes(parsed.options.indexes?.split(',').filter(Boolean) ?? [], fields);
-    const route = parsed.options.route ?? `${name}s`;
-    const table = parsed.options.table ?? `${name}s`;
+    const orm = validateOrm(parsed.options.orm ?? definition.orm ?? config.orm);
+    const profile = parseArchitectureProfile(parsed.options.profile ?? definition.profile ?? config.profile);
+    const fields = parseResourceFields(fieldValues);
+    const indexes = parseResourceIndexes(
+        parsed.options.indexes?.split(',').filter(Boolean) ?? definition.indexes ?? [],
+        fields,
+    );
+    const route = parsed.options.route ?? definition.route ?? `${name}s`;
+    const table = parsed.options.table ?? definition.table ?? `${name}s`;
     if (!/^[a-z][a-z0-9/-]*$/.test(route) || !/^[a-z][a-z0-9_]*$/.test(table))
         throw new Error('Route ou table invalide.');
     if (parsed.options.dryRun) {
