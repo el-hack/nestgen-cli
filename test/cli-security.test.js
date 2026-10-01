@@ -458,6 +458,11 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             orm: 'prisma',
             profile: undefined,
             packageManager: undefined,
+            projectPath: undefined,
+            docker: undefined,
+            swagger: undefined,
+            git: undefined,
+            modules: undefined,
             indexes: undefined,
             definitionFile: undefined,
             noInteractive: true,
@@ -469,6 +474,23 @@ test('parses scriptable CLI options and returns errors for invalid usage', () =>
             dryRun: false,
         },
     });
+    const init = parseCliArgs([
+        'init',
+        'store-api',
+        '--no-interactive',
+        '--project-path=./generated',
+        '--package-manager=npm',
+        '--orm=typeorm',
+        '--docker',
+        '--no-swagger',
+        '--git',
+        '--modules=user,product',
+    ]);
+    assert.equal(init.options.projectPath, './generated');
+    assert.equal(init.options.docker, true);
+    assert.equal(init.options.swagger, false);
+    assert.equal(init.options.git, true);
+    assert.equal(init.options.modules, 'user,product');
     assert.equal(parseModuleArgs(['module', 'order', '--orm=prisma']).orm, 'prisma');
     assert.throws(() => parseCliArgs(['module', 'order', '--orm']), /requiert une valeur/);
     assert.throws(() => parseCliArgs(['module', 'order', '--unknown']), /Option inconnue/);
