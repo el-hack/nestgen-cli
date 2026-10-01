@@ -1,27 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # ────── Charger les helpers ──────
-FEATURES_PATH="$(dirname "$0")/features"
+FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-PM=$1
+PM=${1:?Package manager requis}
 
-$PM install @nestjs/swagger swagger-ui-express
-
-# Ajout dans main.ts (à faire manuellement ou via automatisation)
-echo ""
-echo "📘 Pour activer Swagger, ajoute ceci dans main.ts :"
-echo ""
-cat <<'DOC'
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-
-const config = new DocumentBuilder()
-  .setTitle('API Docs')
-  .setDescription('The API description')
-  .setVersion('1.0')
-  .build();
-const document = SwaggerModule.createDocument(app, config);
-SwaggerModule.setup('api', app, document);
-DOC
+pm_add "$PM" @nestjs/swagger@12 swagger-ui-express@5
+log_success "Swagger sera activé sur /api dans src/main.ts."

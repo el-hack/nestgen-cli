@@ -1,33 +1,65 @@
 {
-  "name": "nestgen-cli",
-  "version": "0.0.7",
-  "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
-  "files": [
-    "nestgen.js",
-    "nestjs-generator"
-  ],
-  "bin": {
-    "nestgen": "nestgen.js"
-  },
-  "author": "Aristide kamara bakarykamara52@gmail.com",
-  "license": "MIT",
-  "keywords": [
-    "nestjs",
-    "cli",
-    "ddd",
-    "cqrs",
-    "scaffold",
-    "generator",
-    "hexagonal"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/el-hack/nestgen-cli.git"
-  },
-  "type": "module",
-  "licenses": "MIT",
-  "dependencies": {
-    "chalk": "^5.3.0",
-    "inquirer": "^9.0.0"
-  }
+    "name": "nestgen-cli",
+    "version": "0.2.0",
+    "description": "NestGen CLI — Générateur modulaire NestJS (DDD, CQRS, Hexagonal)",
+    "files": [
+        "dist",
+        "examples",
+        "nestgen.js",
+        "nestjs-generator"
+    ],
+    "bin": {
+        "nestgen": "nestgen.js"
+    },
+    "author": "Aristide kamara bakarykamara52@gmail.com",
+    "license": "MIT",
+    "keywords": [
+        "nestjs",
+        "cli",
+        "ddd",
+        "cqrs",
+        "scaffold",
+        "generator",
+        "hexagonal"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/el-hack/nestgen-cli.git"
+    },
+    "type": "module",
+    "engines": {
+        "node": ">=24.15.0 <27"
+    },
+    "packageManager": "npm@11.0.0",
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "check": "npm run typecheck && eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "prepack": "npm run build && npm run check && npm run docs:check && npm run landing:check && npm run format:check && npm test && npm run test:example",
+        "test": "node --test",
+        "test:package": "node scripts/package-smoke.mjs",
+        "test:package-manager": "node scripts/package-manager-lockfile-integration.mjs",
+        "test:prisma": "node scripts/prisma-integration.mjs",
+        "test:docker": "node scripts/docker-config-integration.mjs",
+        "test:example": "node scripts/example-store-api-integration.mjs",
+        "test:typeorm": "node scripts/typeorm-http-integration.mjs",
+        "release:verify": "node scripts/release-verify.mjs",
+        "release:verify-remote": "node scripts/release-verify-remote.mjs",
+        "docs:check": "node scripts/docs-contract.mjs",
+        "landing:check": "node scripts/landing-contract.mjs",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "licenses": "MIT",
+    "dependencies": {
+        "chalk": "^5.3.0",
+        "inquirer": "^9.0.0",
+        "prettier": "^3.9.9",
+        "typescript": "^5.9.3"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.5",
+        "@types/node": "^24.19.0",
+        "eslint": "^9.39.5"
+    }
 }

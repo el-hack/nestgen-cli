@@ -1,0 +1,26 @@
+{
+    "version": 1,
+    "name": "order-item",
+    "route": "order-items",
+    "table": "order_items",
+    "orm": "typeorm",
+    "profile": "advanced",
+    "fields": ["quantity:integer{min=1}", "unitPrice:decimal(12;2)"],
+    "relations": [
+        {
+            "type": "belongsTo",
+            "target": "order",
+            "field": "order",
+            "inverse": "items",
+            "onDelete": "RESTRICT"
+        },
+        {
+            "type": "belongsTo",
+            "target": "product",
+            "field": "product",
+            "inverse": "orderItems",
+            "onDelete": "RESTRICT"
+        }
+    ],
+    "uniqueIndexes": ["orderId+productId"]
+}

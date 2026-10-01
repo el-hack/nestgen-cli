@@ -1,0 +1,33 @@
+# Moteur de génération
+
+Les commandes `nestgen module` et `nestgen resource` utilisent le moteur TypeScript compilé dans `dist/engine`. Elles calculent toutes les transformations (dont AppModule, schéma et runtime Prisma) avant la première écriture. Un plan commun explicite les créations et remplacements ; les collisions et chemins invalides sont refusés avant staging.
+
+Le répertoire exclusif `.nestgen-transaction` sert de verrou et contient un manifeste, les nouveaux contenus et les sauvegardes. Chaque fichier est installé par renommage sur le même système de fichiers. Si une opération échoue, les fichiers appliqués sont restaurés dans l'ordre inverse, avec leurs permissions, puis les nouveaux répertoires sont retirés. Les tests injectent des erreurs à chaque étape de création, écriture, changement de permissions et renommage pour les deux générateurs et les deux ORM de module.
+
+Cette restauration couvre les erreurs interceptées du processus ; ce n'est pas une transaction multi-fichier du système d'exploitation. Après un arrêt brutal ou une erreur persistante empêchant la restauration, la génération suivante refuse de remplacer le verrou. Le manifeste associe chaque chemin à son index ; `old-N` contient l'original d'un remplacement. Conserver une copie du répertoire avant récupération, examiner les fichiers concernés et restaurer les originaux avant de retirer le verrou. Une ancienne transaction `.nestgen-transaction.json` bloque également la génération. Si seul le nettoyage final échoue après application complète, le CLI signale le nettoyage nécessaire sans annoncer un échec de génération.
+
+Les entrées utilisateur sont des données de templates et ne sont jamais interpolées dans une commande shell.
+
+Les scripts Bash d’initialisation restent une couche de compatibilité pendant la migration. Ils sont appelés avec des arguments séparés par `spawnSync`, sans shell Node ni interpolation de commande. Le chemin de génération de modules ne les utilise plus.
+
+## Profil avancé : frontières applicatives
+
+Une ressource avancée place ses contrats `Create…Input`, `Update…Input` et `…Output` dans `application/`. Son port de persistance est dans `application/ports/` : il dépend uniquement de ces contrats et du modèle de domaine. Il ne dépend ni des DTOs HTTP, ni de Nest, ni de TypeORM. Le service d’application est une classe TypeScript sans décorateur de framework ; le module Nest l’assemble par une factory explicitement typée.
+
+L’adaptateur TypeORM traduit l’absence et les violations d’unicité en erreurs applicatives. Le contrôleur REST traduit seulement ces erreurs en `404` et `409`, puis convertit les dates des DTOs en entrées applicatives. Ainsi, les statuts HTTP ne traversent pas le contrat applicatif. Les profils simples gardent leur génération conventionnelle actuelle.
+
+## Évaluation des Nest schematics
+
+Les schematics Nest sont adaptés à des ressources Nest conventionnelles, mais ne modélisent pas le contrat hexagonal de NestGen (ports, tokens d’injection, CQRS et adaptateurs ORM). Les adopter imposerait des transformations correctives fragiles après génération. Le moteur conserve donc des templates versionnés et une transformation AST ciblée ; il pourra appeler un schematic à l’avenir uniquement pour une cible compatible, derrière une interface de processus sans shell.
+
+## Préflight commun
+
+Modules et ressources vérifient la même structure avant toute écriture : application autonome à la racine, `src/app.module.ts`, `sourceRoot: "src"` (ou absent), manifeste JSON valide et dépendances du générateur sélectionné. CQRS est requis pour les modules CQRS, pas pour les ressources REST. Les workspaces, racines personnalisées et métadonnées AppModule dynamiques (imports non littéraux, spread, clés calculées, imports dupliqués) sont refusés avec un diagnostic explicite.
+
+La racine fournie est résolue une fois vers son chemin réel. Dans cette racine, les chemins d'entrée et de destination contrôlés refusent tout lien symbolique, y compris interne ou pendant, avant lecture ou mutation ; les fichiers et répertoires existants d'une fonctionnalité ne sont jamais réutilisés silencieusement. La même validation de confinement est réappliquée au plan d'écriture. Les tests communs vérifient le contenu et les permissions du projet, les liens et leurs cibles externes après refus. Ces vérifications supposent que le projet n'est pas modifié simultanément par un autre processus pendant la génération.
+
+## Qualité du code généré
+
+Les générateurs utilisent l'API asynchrone Prettier 3 pour les nouveaux fichiers TypeScript, en mémoire et avant la transaction. La configuration Prettier et EditorConfig applicable à chaque destination est respectée ; sans configuration, les conventions par défaut de Nest sont utilisées (quotes simples, virgules finales). Une erreur de configuration ou de syntaxe interrompt la génération sans écriture. Les modifications ciblées d'AppModule et du schéma Prisma conservent le formatage du code existant.
+
+Les DTOs importent uniquement les validateurs utilisés. Les intégrations compilent les modules TypeORM et Prisma ainsi que les ressources simple/advanced avec `noUnusedLocals` et `noUnusedParameters`, puis vérifient les nouveaux fichiers avec Prettier. Les imports relatifs `.js` sont compatibles avec les sorties TypeScript CommonJS et NodeNext. Le CLI ne lance pas le lint arbitraire du projet utilisateur ; les contrôles de style pris en charge sont Prettier et les contrôles TypeScript de la matrice testée.

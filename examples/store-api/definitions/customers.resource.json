@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "name": "customer",
+    "route": "customers",
+    "table": "customers",
+    "orm": "typeorm",
+    "profile": "advanced",
+    "fields": ["email:string{length=254}!", "name:string{length=120}"],
+    "list": {
+        "filters": { "email": ["eq", "contains"] },
+        "search": ["email", "name"],
+        "sort": ["email", "name"]
+    }
+}

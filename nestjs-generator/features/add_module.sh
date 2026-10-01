@@ -1,7 +1,9 @@
 #!/bin/bash
 
-RAW_NAME=$1
-ORM=$2
+set -euo pipefail
+
+RAW_NAME=${1:-}
+ORM=${2:-}
 
 # ────── Charger les helpers ──────
 FEATURES_PATH="$(dirname "$0")"
@@ -9,33 +11,68 @@ source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
 
-if [ -z "$RAW_NAME" ]; then
-  echo "❌ Tu dois passer un nom de module."
+if [[ ! "$RAW_NAME" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
+  log_error "Le nom du module doit commencer par une lettre et ne contenir que des lettres, chiffres, tirets ou underscores."
   exit 1
 fi
 
-if [ -z "$ORM" ]; then
-  echo "❌ ORM manquant (typeorm ou prisma)."
+if [[ "$ORM" != "typeorm" && "$ORM" != "prisma" ]]; then
+  log_error "ORM non supporté : ${ORM:-vide}. Valeurs acceptées : typeorm, prisma."
   exit 1
 fi
 
-# ────── Formatage ──────
-NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
-PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\u\2/g' | sed -E 's/[-_]//g')
+# ────── Formatage portable ──────
+if ! RESOURCE_DATA=$(node "$FEATURES_PATH/resource_name.mjs" "$RAW_NAME"); then
+  log_error "Impossible de normaliser le nom de la ressource."
+  exit 1
+fi
 
-NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]')
-PASCAL=$(echo "$NAME" | sed -E 's/(^|[-_])([a-z])/\U\2/g' | sed -E 's/[-_]//g')
+while IFS='=' read -r key value; do
+  case "$key" in
+    NAME) NAME=$value ;;
+    PASCAL) PASCAL=$value ;;
+    CAMEL) CAMEL=$value ;;
+    PLURAL) PLURAL=$value ;;
+    ROUTE) ROUTE=$value ;;
+    TABLE) TABLE=$value ;;
+  esac
+done <<< "$RESOURCE_DATA"
 
-CAMEL=$(echo "$PASCAL" | sed -E 's/^([A-Z])/\L\1/')
+if [[ -z "${NAME:-}" || -z "${PASCAL:-}" || -z "${CAMEL:-}" || -z "${ROUTE:-}" || -z "${TABLE:-}" ]]; then
+  log_error "Impossible de normaliser le nom de la ressource."
+  exit 1
+fi
 
-MODULE_DIR="src/app/$NAME"
+REPOSITORY_TOKEN="${PASCAL}RepositoryToken"
+
+PROJECT_ROOT="$(pwd -P)"
+SOURCE_ROOT="$PROJECT_ROOT/src/app"
+
+if ! node "$FEATURES_PATH/preflight.mjs" "$PROJECT_ROOT" "$ORM" >/dev/null; then
+  log_error "Le projet cible ne satisfait pas les préconditions de génération."
+  exit 1
+fi
+
+if [ -L "$PROJECT_ROOT/src" ] || [ -L "$SOURCE_ROOT" ]; then
+  log_error "Les liens symboliques ne sont pas pris en charge dans src/app."
+  exit 1
+fi
+
+mkdir -p "$SOURCE_ROOT"
+MODULE_DIR="$SOURCE_ROOT/$NAME"
+
+if [ -e "$MODULE_DIR" ] || [ -L "$MODULE_DIR" ]; then
+  log_error "Le module $NAME existe déjà. Aucune modification n'a été appliquée."
+  exit 1
+fi
+
 mkdir -p "$MODULE_DIR"/{core/{application/{commands,events,queries},domain/{entities,ports}},infrastructure/{adapters,persistences/repositories},interfaces/{controllers,dtos}}
 
 # ────── Entity ──────
 cat > "$MODULE_DIR/core/domain/entities/${NAME}.entity.ts" <<EOF
 export class $PASCAL {
   constructor(
-    public readonly id: string,
+    public readonly id: string | undefined,
     public name: string,
     public email: string,
   ) {}
@@ -45,6 +82,8 @@ EOF
 # ────── Port ──────
 cat > "$MODULE_DIR/core/domain/ports/${NAME}.repository.ts" <<EOF
 import { $PASCAL } from '../entities/${NAME}.entity';
+
+export const ${REPOSITORY_TOKEN} = Symbol('${PASCAL}RepositoryPort');
 
 export interface ${PASCAL}RepositoryPort {
   save(${CAMEL}: $PASCAL): Promise<$PASCAL>;
@@ -61,17 +100,20 @@ EOF
 
 # ────── Command Handler ──────
 cat > "$MODULE_DIR/core/application/commands/create-${NAME}.handler.ts" <<EOF
+import { Inject } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from './create-${NAME}.command';
 import { $PASCAL } from '../../domain/entities/${NAME}.entity';
-import { ${PASCAL}RepositoryPort } from '../../domain/ports/${NAME}.repository';
+import { ${PASCAL}RepositoryPort, ${REPOSITORY_TOKEN} } from '../../domain/ports/${NAME}.repository';
 
 @CommandHandler(Create${PASCAL}Command)
 export class Create${PASCAL}Handler implements ICommandHandler<Create${PASCAL}Command> {
-  constructor(private readonly repo: ${PASCAL}RepositoryPort) {}
+  constructor(
+    @Inject(${REPOSITORY_TOKEN}) private readonly repo: ${PASCAL}RepositoryPort,
+  ) {}
 
   async execute(command: Create${PASCAL}Command): Promise<string> {
-    const $CAMEL = new $PASCAL(Date.now().toString(), command.name, command.email);
+    const $CAMEL = new $PASCAL(undefined, command.name, command.email);
     const saved = await this.repo.save($CAMEL);
     return saved.id;
   }
@@ -98,7 +140,7 @@ import { CommandBus } from '@nestjs/cqrs';
 import { Create${PASCAL}Command } from '../../core/application/commands/create-${NAME}.command';
 import { Create${PASCAL}Dto } from '../dtos/create-${NAME}.dto';
 
-@Controller('${NAME}s')
+@Controller('${ROUTE}')
 export class ${PASCAL}Controller {
   constructor(private readonly commandBus: CommandBus) {}
 
@@ -121,7 +163,7 @@ if [ "$ORM" == "typeorm" ]; then
   cat > "$MODULE_DIR/infrastructure/persistences/repositories/${NAME}.orm.ts" <<EOF
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity('${NAME}s')
+@Entity('${TABLE}')
 export class ${PASCAL}Entity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -147,7 +189,10 @@ export class ${PASCAL}TypeOrmRepository implements ${PASCAL}RepositoryPort {
   constructor(@InjectRepository(${PASCAL}Entity) private readonly repo: Repository<${PASCAL}Entity>) {}
 
   async save(${CAMEL}: $PASCAL): Promise<$PASCAL> {
-    const entity = this.repo.create(${CAMEL});
+    const entity = this.repo.create({
+      name: ${CAMEL}.name,
+      email: ${CAMEL}.email,
+    });
     const saved = await this.repo.save(entity);
     return new $PASCAL(saved.id, saved.name, saved.email);
   }
@@ -162,7 +207,7 @@ EOF
   REPO_CLASS="${PASCAL}TypeOrmRepository"
   ENTITY_IMPORT="TypeOrmModule.forFeature([${PASCAL}Entity])"
   REPO_PROVIDER="{
-      provide: '${PASCAL}RepositoryPort',
+      provide: ${REPOSITORY_TOKEN},
       useClass: ${PASCAL}TypeOrmRepository,
     }"
 
@@ -198,7 +243,7 @@ EOF
   REPO_CLASS="${PASCAL}PrismaRepository"
   ENTITY_IMPORT=""
   REPO_PROVIDER="{
-      provide: '${PASCAL}RepositoryPort',
+      provide: ${REPOSITORY_TOKEN},
       useClass: ${PASCAL}PrismaRepository,
     }"
 fi
@@ -208,6 +253,7 @@ IMPORTS="import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { ${PASCAL}Controller } from './interfaces/controllers/${NAME}.controller';
 import { Create${PASCAL}Handler } from './core/application/commands/create-${NAME}.handler';
+import { ${REPOSITORY_TOKEN} } from './core/domain/ports/${NAME}.repository';
 import { $REPO_CLASS } from './infrastructure/persistences/repositories/${NAME}.${ORM}.repository';"
 
 if [ "$ORM" = "typeorm" ]; then
@@ -223,7 +269,6 @@ echo "$IMPORTS
   controllers: [${PASCAL}Controller],
   providers: [
     Create${PASCAL}Handler,
-    $REPO_CLASS,
     $REPO_PROVIDER,
   ],
 })
@@ -231,4 +276,3 @@ export class ${PASCAL}Module {}
 " > "$MODULE_DIR/${NAME}.module.ts"
 
 bash "$(dirname "$0")/inject_module_to_app.sh" "$NAME" "$ORM"
-
