@@ -1,6 +1,6 @@
-# Exemple Store API — NestGen CLI 0.2.0
+# Exemple Store API — NestGen CLI 0.2.1
 
-Cette application exemple décrit une API de vente avec des clients, produits, commandes et lignes de commande. Elle est validée avec `nestgen-cli@0.2.0` et TypeORM, avec le profil d’architecture `advanced`.
+Cette application exemple décrit une API de vente avec des clients, produits, commandes et lignes de commande. Elle est validée avec `nestgen-cli@0.2.1` et TypeORM, avec le profil d’architecture `advanced`.
 
 Les fichiers de `definitions/` sont la source de vérité. Ils restent volontairement déclaratifs : l’application est reconstruite par le CLI au lieu de conserver une copie de fichiers générés qui pourrait diverger du produit.
 
@@ -11,7 +11,7 @@ Créez un dossier de travail, installez la version exacte du CLI puis générez 
 ```bash
 mkdir nestgen-store-api && cd nestgen-store-api
 npm init --yes
-npm install nestgen-cli@0.2.0
+npm install nestgen-cli@0.2.1
 
 ./node_modules/.bin/nestgen init store-api \
   --no-interactive \
