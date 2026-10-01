@@ -73,6 +73,11 @@ export function validateOrm(value) {
     return orm;
 }
 
+function validatePackageManager(value) {
+    if (!['npm', 'pnpm', 'yarn'].includes(value)) throw new Error('Package manager invalide.');
+    return value;
+}
+
 export function resolveProjectPath(value) {
     const projectPath = String(value ?? '').trim();
 
@@ -95,6 +100,11 @@ export function parseCliArgs(args) {
         orm: undefined,
         profile: undefined,
         packageManager: undefined,
+        projectPath: undefined,
+        docker: undefined,
+        swagger: undefined,
+        git: undefined,
+        modules: undefined,
         indexes: undefined,
         definitionFile: undefined,
         noInteractive: false,
@@ -117,6 +127,16 @@ export function parseCliArgs(args) {
         else if (argument.startsWith('--profile=')) options.profile = argument.slice(10);
         else if (argument === '--package-manager') options.packageManager = args[++index];
         else if (argument.startsWith('--package-manager=')) options.packageManager = argument.slice(18);
+        else if (argument === '--project-path') options.projectPath = args[++index];
+        else if (argument.startsWith('--project-path=')) options.projectPath = argument.slice(15);
+        else if (argument === '--docker') options.docker = true;
+        else if (argument === '--no-docker') options.docker = false;
+        else if (argument === '--swagger') options.swagger = true;
+        else if (argument === '--no-swagger') options.swagger = false;
+        else if (argument === '--git') options.git = true;
+        else if (argument === '--no-git') options.git = false;
+        else if (argument === '--modules') options.modules = args[++index];
+        else if (argument.startsWith('--modules=')) options.modules = argument.slice(10);
         else if (argument === '--fields') options.fields = args[++index];
         else if (argument.startsWith('--fields=')) options.fields = argument.slice(9);
         else if (argument === '--indexes') options.indexes = args[++index];
@@ -260,22 +280,43 @@ function validatePromptValue(validator) {
 
 async function runInteractiveInit(options) {
     if (!options.quiet) printLogo();
-    if (options.noInteractive)
-        throw new Error(
-            'init --no-interactive requiert des options de projet qui ne sont pas encore prises en charge.',
-        );
-
     if (!fs.existsSync(GENERATE_SCRIPT)) {
         throw new Error(`Script introuvable : ${GENERATE_SCRIPT}`);
     }
 
-    const answers = await askInitQuestions();
+    const answers = options.noInteractive
+        ? (() => {
+              const missing = [
+                  ['nom du projet', options.projectName],
+                  ['--project-path', options.projectPath],
+                  ['--package-manager', options.packageManager],
+                  ['--orm', options.orm],
+                  ['--docker ou --no-docker', options.docker],
+                  ['--swagger ou --no-swagger', options.swagger],
+                  ['--git ou --no-git', options.git],
+                  ['--modules', options.modules],
+              ]
+                  .filter(([, value]) => value === undefined)
+                  .map(([name]) => name);
+              if (missing.length) throw new Error(`init --no-interactive requiert : ${missing.join(', ')}.`);
+              return {
+                  projectName: options.projectName,
+                  projectPath: options.projectPath,
+                  packageManager: options.packageManager,
+                  orm: options.orm,
+                  withDocker: options.docker,
+                  withSwagger: options.swagger,
+                  withGit: options.git,
+                  modules: options.modules ? options.modules.split(',').filter(Boolean) : [],
+              };
+          })()
+        : await askInitQuestions();
     const { projectName, projectPath, packageManager, orm, withSwagger, withDocker, withGit, modules } = answers;
 
     const env = {
         APP_NAME: validateModuleName(projectName),
         PROJECT_PATH: resolveProjectPath(projectPath),
-        PM: packageManager,
+        PM: validatePackageManager(packageManager),
         ORM: validateOrm(orm),
         WITH_SWAGGER: withSwagger ? 'y' : 'n',
         WITH_DOCKER: withDocker ? 'y' : 'n',
@@ -437,10 +478,15 @@ async function runResourceGeneration(parsed) {
 
 function printUsage() {
     console.log(
-        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init                         Génère un projet NestJS en mode interactif\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
+        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init [nom]                   Génère un projet NestJS\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
   config init|show               Gère nestgen.config.json
   doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
-  --package-manager <pm>        Définit le package manager du config init
+  --package-manager <pm>        Définit npm, pnpm ou yarn
+  --project-path <chemin>       Définit le dossier parent du projet init
+  --docker, --no-docker         Active ou désactive Docker pour init
+  --swagger, --no-swagger       Active ou désactive Swagger pour init
+  --git, --no-git               Active ou désactive Git pour init
+  --modules <a,b>               Définit les modules init, séparés par des virgules
   --dry-run                    Affiche le plan sans écrire
   --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
     );
@@ -492,7 +538,8 @@ export async function main(args = process.argv.slice(2)) {
 
     switch (parsed.command) {
         case 'init':
-            await runInteractiveInit(parsed.options);
+            if (parsed.positionals.length > 1) throw new Error('init accepte au plus un nom de projet.');
+            await runInteractiveInit({ ...parsed.options, projectName: parsed.positionals[0] });
             break;
 
         case 'module':
