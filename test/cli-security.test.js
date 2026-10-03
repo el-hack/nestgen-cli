@@ -804,16 +804,12 @@ test('previews the exact generation transaction without writing and reports conf
         false,
     );
 
-    const dryRun = spawnSync(
-        process.execPath,
-        [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--quiet'],
-        {
-            cwd: fixturePath,
-            encoding: 'utf8',
-        },
-    );
+    const dryRun = spawnSync(process.execPath, [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--json'], {
+        cwd: fixturePath,
+        encoding: 'utf8',
+    });
     assert.equal(dryRun.status, 0, dryRun.stderr);
-    const output = JSON.parse(dryRun.stdout);
+    const output = JSON.parse(dryRun.stdout).result;
     assert.equal(output.version, 1);
     assert.deepEqual(
         output.changes,
@@ -836,11 +832,11 @@ test('previews the exact generation transaction without writing and reports conf
 
     const conflictRun = spawnSync(
         process.execPath,
-        [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--quiet'],
+        [cliPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--json'],
         { cwd: fixturePath, encoding: 'utf8' },
     );
     assert.equal(conflictRun.status, 0, conflictRun.stderr);
-    const conflictOutput = JSON.parse(conflictRun.stdout);
+    const conflictOutput = JSON.parse(conflictRun.stdout).result;
     assert.match(conflictOutput.conflicts[0].reason, /existe déjà/);
 });
 
@@ -1636,13 +1632,13 @@ test('stops project generation on external command failures without success outp
         NESTGEN_TEST_FAIL_NEST: '1',
     });
     assert.equal(failedNest.status, 41);
-    assert.match(failedNest.stdout, /Création du projet NestJS a échoué/);
+    assert.match(failedNest.stderr, /Création du projet NestJS a échoué/);
     assert.doesNotMatch(failedNest.stdout, /généré avec succès/);
 
     const npmFailure = createExternalCommandFixture();
     const failedNpm = runProjectGeneration(npmFailure.fixturePath, npmFailure.binPath, { NESTGEN_TEST_FAIL_NPM: '1' });
     assert.equal(failedNpm.status, 42);
-    assert.match(failedNpm.stdout, /Installation des packages communs a échoué/);
+    assert.match(failedNpm.stderr, /Installation des packages communs a échoué/);
     assert.doesNotMatch(failedNpm.stdout, /généré avec succès/);
 
     const gitFailure = createExternalCommandFixture();
@@ -1651,7 +1647,7 @@ test('stops project generation on external command failures without success outp
         NESTGEN_TEST_FAIL_GIT: '1',
     });
     assert.equal(failedGit.status, 43);
-    assert.match(failedGit.stdout, /Initialisation Git a échoué/);
+    assert.match(failedGit.stderr, /Initialisation Git a échoué/);
     assert.doesNotMatch(failedGit.stdout, /généré avec succès/);
 });
 
@@ -1670,7 +1666,7 @@ test('adds the operational foundation only when init explicitly enables it', () 
     const project = path.join(fixturePath, 'sample', 'src');
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Socle d’exploitation activé/);
+    assert.match(result.stdout, /Socle d’exploitation\s+activé/);
     assert.equal(fs.existsSync(path.join(project, 'operations', 'health.controller.ts')), true);
     assert.match(fs.readFileSync(path.join(project, 'main.ts'), 'utf8'), /enableShutdownHooks/);
     assert.match(fs.readFileSync(path.join(project, 'app.module.ts'), 'utf8'), /OperationsModule/);

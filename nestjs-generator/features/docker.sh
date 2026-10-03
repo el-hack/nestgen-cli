@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+source "$(dirname "${BASH_SOURCE[0]}")/logger.sh"
+
 set -euo pipefail
 
 APP_NAME=${1:?Nom_application_requis}
@@ -8,14 +10,14 @@ PM=${2:-npm}
 case "$PM" in
   npm|pnpm|yarn) ;;
   *)
-    echo "❌ Package manager non supporté pour Docker : $PM."
+    log_error "Package manager non supporté pour Docker : $PM."
     exit 1
     ;;
 esac
 
 for file in Dockerfile compose.yaml .dockerignore; do
   if [ -e "$file" ]; then
-    echo "❌ $file existe déjà. Aucune configuration Docker n'a été remplacée."
+    log_error "$file existe déjà. Aucune configuration Docker n'a été remplacée."
     exit 1
   fi
 done
@@ -186,7 +188,7 @@ POSTGRES_PORT=5432
 PORT=3000
 ENV
 else
-  echo "ℹ️  .env.example existe déjà et a été conservé."
+  log_info ".env.example existe déjà et a été conservé."
 fi
 
-echo "✅ Docker de développement et image de production générés pour $APP_NAME ($PM)."
+log_success "Docker de développement et image de production générés pour $APP_NAME ($PM)."

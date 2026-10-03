@@ -11,4 +11,4 @@ source "$FEATURES_PATH/logger.sh"
 git init
 git add .
 git commit -m "🚀 Initial commit (NestJS starter clean architecture)"
-echo "✅ Git initialisé et commité !"
+log_success "Git initialisé et commité !"

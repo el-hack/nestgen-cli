@@ -130,10 +130,10 @@ try {
 
     const dryRun = run(
         process.execPath,
-        [binaryPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--no-interactive', '--quiet'],
+        [binaryPath, 'module', 'invoice', '--orm=typeorm', '--dry-run', '--no-interactive', '--json'],
         { cwd: fixtureDirectory },
     );
-    const dryRunPlan = JSON.parse(dryRun.stdout);
+    const dryRunPlan = JSON.parse(dryRun.stdout).result;
     assert.equal(dryRunPlan.version, 1);
     assert.equal(dryRunPlan.operation, 'module');
     assert.equal(dryRunPlan.conflicts.length, 0);

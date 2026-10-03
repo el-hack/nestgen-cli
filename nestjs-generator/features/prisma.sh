@@ -12,7 +12,7 @@ PM=${1:?Package manager requis}
 APP_NAME=${2:?Nom_application_requis}
 
 if [ -e prisma/schema.prisma ]; then
-  echo "❌ prisma/schema.prisma existe déjà. Aucune configuration Prisma n'a été remplacée."
+  log_error "prisma/schema.prisma existe déjà. Aucune configuration Prisma n'a été remplacée."
   exit 1
 fi
 
@@ -25,7 +25,7 @@ cat > .env <<EOF
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/$APP_NAME"
 EOF
 else
-  echo "ℹ️  .env existe déjà et a été conservé."
+  log_info ".env existe déjà et a été conservé."
 fi
 
 cat > prisma/schema.prisma <<EOF
@@ -70,4 +70,4 @@ EOF
 
 pm_exec "$PM" prisma generate
 
-echo "✅ Prisma initialisé avec succès !"
+log_success "Prisma initialisé avec succès !"
