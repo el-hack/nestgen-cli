@@ -4,6 +4,19 @@ Ce projet suit [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.2 - 2026-10-03
+
+### Fixed
+
+- Sorties du terminal harmonisées : diagnostics regroupés, aide alignée, configuration lisible, aperçus de fichiers et confirmations de génération.
+- Conseils de réparation affichés uniquement lorsqu’ils sont utiles ; détails techniques disponibles avec `--verbose`.
+- Journaux Bash cohérents, erreurs sur stderr et couleurs désactivées avec `--no-color`, `NO_COLOR` ou une sortie redirigée.
+- `doctor` accepte toute la plage Node.js déclarée : `>=24.15.0 <27`.
+
+### Changed
+
+- Les aperçus destinés au terminal utilisent une présentation lisible. Les scripts qui analysaient leur JSON implicite doivent ajouter `--json` ; le contrat JSON versionné reste inchangé.
+
 ## 0.2.1 - 2026-10-01
 
 ### Fixed

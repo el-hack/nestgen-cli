@@ -4,6 +4,7 @@ Chaque dossier de `versions/` est un instantané du contrat publié : il n’est
 
 | Version | Référence                        | Migration depuis la version précédente                                    |
 | ------- | -------------------------------- | ------------------------------------------------------------------------- |
+| 0.2.2   | [Guide 0.2.2](versions/0.2.2.md) | Sorties terminal harmonisées ; utilisez `--json` pour les scripts.        |
 | 0.2.1   | [Guide 0.2.1](versions/0.2.1.md) | Correctif de publication ; aucun changement de configuration obligatoire. |
 | 0.2.0   | [Guide 0.2.0](versions/0.2.0.md) | Mettez à jour le paquet ; aucun changement de configuration obligatoire.  |
 | 0.1.0   | [Guide 0.1.0](versions/0.1.0.md) | Première version publique.                                                |

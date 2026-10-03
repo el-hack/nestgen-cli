@@ -6,18 +6,18 @@
 
 NestGen CLI generates NestJS project scaffolding and TypeORM or Prisma resources. The canonical package is [`nestgen-cli`](https://www.npmjs.com/package/nestgen-cli); the canonical repository is [`el-hack/nestgen-cli`](https://github.com/el-hack/nestgen-cli).
 
-## Published in 0.2.1 / Disponible dans 0.2.1
+## Published in 0.2.2 / Disponible dans 0.2.2
 
 | Available now / Disponible maintenant                            | Evidence / Preuve                                                                                                                      |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Nest project, module and TypeORM or Prisma resource generation   | The commands are shipped by `nestgen-cli@0.2.1` and covered by the CLI contract tests.                                                 |
+| Nest project, module and TypeORM or Prisma resource generation   | The commands are shipped by `nestgen-cli@0.2.2` and covered by the CLI contract tests.                                                 |
 | Declarative resource relations, safe updates and migration plans | The generated manifest protects manual edits; migrations remain explicitly reviewed and applied by the developer.                      |
 | Operational foundation and authorization metadata                | Both are optional extension points; NestGen does not configure an identity provider, a global guard or an external monitoring service. |
 | Store API example                                                | The package ships the [version-pinned example](examples/store-api/README.md), which CI reconstructs from its resource definitions.     |
 
 ## Planned (not released) / Prévu (non publié)
 
-The [roadmap](roadmap.md) contains topics under consideration after 0.2.1. They have no release date and are not part of the npm contract until they appear in a versioned guide and `CHANGELOG.md`. La roadmap recense des pistes après 0.2.1 ; elles n’ont ni date de sortie ni engagement de compatibilité avant leur publication dans un guide versionné et le changelog.
+The [roadmap](roadmap.md) contains topics under consideration after 0.2.2. They have no release date and are not part of the npm contract until they appear in a versioned guide and `CHANGELOG.md`. La roadmap recense des pistes après 0.2.2 ; elles n’ont ni date de sortie ni engagement de compatibilité avant leur publication dans un guide versionné et le changelog.
 
 ## Supported contract
 
@@ -52,11 +52,11 @@ For Prisma, run `npx prisma generate` and apply the schema with `npx prisma db p
 Install the announced release and verify the exact binary before generating anything. Installez la version annoncée et vérifiez le binaire exact avant toute génération.
 
 ```bash
-npm install --global nestgen-cli@0.2.1
-nestgen --version # 0.2.1
+npm install --global nestgen-cli@0.2.2
+nestgen --version # 0.2.2
 ```
 
-Then follow the [Store API example](examples/store-api/README.md): it generates customers, products, orders and order items; starts PostgreSQL; creates an explicit migration; and runs generated tests. The versioned [guide](docs/versions/0.2.1.md) documents the commands and constraints used by the demo. Ensuite, suivez l’exemple Store API : il couvre la génération, PostgreSQL, une migration explicite, les tests générés et la documentation de la version.
+Then follow the [Store API example](examples/store-api/README.md): it generates customers, products, orders and order items; starts PostgreSQL; creates an explicit migration; and runs generated tests. The versioned [guide](docs/versions/0.2.2.md) documents the commands and constraints used by the demo. Ensuite, suivez l’exemple Store API : il couvre la génération, PostgreSQL, une migration explicite, les tests générés et la documentation de la version.
 
 The CI verifies the public commands against the announced package version, reconstructs the example and installs the npm tarball in a clean consumer. It validates reproducibility of these flows, not a production certification / pas une certification de production.
 
@@ -65,7 +65,7 @@ The CI verifies the public commands against the announced package version, recon
 The following flow is the supported end-to-end TypeORM path. Prerequisites: Node.js `>=24.15.0 <27`, npm 11 and Docker with Compose. It uses Docker for PostgreSQL and creates an explicit migration.
 
 ```bash
-npm install --global nestgen-cli@0.2.1
+npm install --global nestgen-cli@0.2.2
 nestgen --version
 nestgen init
 ```
