@@ -108,12 +108,12 @@ done
 
 # ────── Résumé final ──────
 echo ""
-log_success "✅ Projet NestJS \"$APP_NAME\" généré avec succès 🎉"
-echo "📁 Localisation : $FULL_PATH"
-echo "📦 Package manager : $PM"
-echo "🧠 ORM : $ORM"
-if [ "$WITH_DOCKER" = "y" ]; then echo "🐳 Docker activé"; fi
-if [ "$WITH_SWAGGER" = "y" ]; then echo "📚 Swagger activé"; fi
-if [ "$WITH_OPERATIONS" = "y" ]; then echo "🩺 Socle d’exploitation activé"; fi
-if [ "$WITH_GIT" = "y" ]; then echo "🔃 Git initialisé"; fi
-if [ -n "$MODULES" ]; then echo "📦 Modules générés : $MODULES"; fi
+log_success "Projet NestJS \"$APP_NAME\" généré avec succès"
+printf '\n  %-24s %s\n' 'Localisation' "$FULL_PATH"
+printf '  %-24s %s\n' 'Package manager' "$PM" 'ORM' "$ORM"
+if [ "$WITH_DOCKER" = "y" ]; then printf '  %-24s %s\n' 'Docker' 'activé'; fi
+if [ "$WITH_SWAGGER" = "y" ]; then printf '  %-24s %s\n' 'Swagger' 'activé'; fi
+if [ "$WITH_OPERATIONS" = "y" ]; then printf '  %-24s %s\n' 'Socle d’exploitation' 'activé'; fi
+if [ "$WITH_GIT" = "y" ]; then printf '  %-24s %s\n' 'Git' 'initialisé'; fi
+if [ -n "$MODULES" ]; then printf '  %-24s %s\n' 'Modules générés' "$MODULES"; fi
+printf '\n'

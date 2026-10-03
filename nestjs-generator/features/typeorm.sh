@@ -10,7 +10,7 @@ FEATURES_PATH="$(dirname "$0")"
 source "$FEATURES_PATH/utils.sh"
 source "$FEATURES_PATH/logger.sh"
 
-log_info "📦 Installation de TypeORM et PostgreSQL..."
+log_info "Installation de TypeORM et PostgreSQL..."
 
 pm_add "$PM" @nestjs/typeorm@12 typeorm@0.3 pg@8 dotenv@16
 pm_add_dev "$PM" ts-node@10
@@ -75,6 +75,6 @@ DATABASE_NAME=appdb
 EOF
 fi
 
-log_success "✅ TypeORM installé avec succès"
+log_success "TypeORM installé avec succès"
 
-log_info "💡 TypeORM utilise src/database/typeorm.config.ts et src/database/data-source.ts pour des migrations explicites."
+log_info "TypeORM utilise src/database/typeorm.config.ts et src/database/data-source.ts pour des migrations explicites."

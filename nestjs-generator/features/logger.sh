@@ -7,18 +7,22 @@ YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 NC='\033[0m' # No Color
 
+if [ ! -t 1 ] || [ -n "${NO_COLOR+x}" ] || [ "${TERM:-}" = "dumb" ]; then
+  RED='' GREEN='' YELLOW='' BLUE='' NC=''
+fi
+
 log_info() {
-  echo -e "${BLUE}ℹ️  $1${NC}"
+  printf '  %b›%b %s\n' "$BLUE" "$NC" "$1"
 }
 
 log_success() {
-  echo -e "${GREEN}✅ $1${NC}"
+  printf '  %b✓%b %s\n' "$GREEN" "$NC" "$1"
 }
 
 log_warn() {
-  echo -e "${YELLOW}⚠️  $1${NC}"
+  printf '  %b⚠%b %s\n' "$YELLOW" "$NC" "$1"
 }
 
 log_error() {
-  echo -e "${RED}❌ $1${NC}"
+  printf '  %b✖%b %s\n' "$RED" "$NC" "$1" >&2
 }

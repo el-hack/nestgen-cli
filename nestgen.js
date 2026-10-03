@@ -18,6 +18,16 @@ import {
 import { configFileName, defaultConfig, loadConfigIfPresent, writeConfig } from './dist/engine/project-config.js';
 import { parseArchitectureProfile } from './dist/engine/architecture-profile.js';
 import { planResourceMigration } from './dist/engine/migration-plan.js';
+import { formatDoctorOutput } from './dist/cli/doctor-output.js';
+import {
+    heading,
+    success,
+    formatError,
+    formatConfig,
+    formatPlan,
+    formatMigration,
+    formatHelp,
+} from './dist/cli/output.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -32,17 +42,7 @@ const MODULE_NAME_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 
 // ────── Logo CLI
 function printLogo() {
-    console.log(
-        chalk.magentaBright(`
-███╗   ██╗███████╗███████╗████████╗ ██████╗ ███████╗███╗   ██╗
-████╗  ██║██╔════╝██╔════╝╚══██╔══╝██╔════╝ ██╔════╝████╗  ██║
-██╔██╗ ██║█████╗  ███████╗   ██║   ██║  ███╗█████╗  ██╔██╗ ██║
-██║╚██╗██║██╔══╝  ╚════██║   ██║   ██║   ██║██╔══╝  ██║╚██╗██║
-██║ ╚████║███████╗███████║   ██║   ╚██████╔╝███████╗██║ ╚████║
-╚═╝  ╚═══╝╚══════╝╚══════╝   ╚═╝    ╚═════╝ ╚══════╝╚═╝  ╚═══╝
-`),
-    );
-    console.log(chalk.cyan.bold('✨ NestGen CLI — Générateur modulaire NestJS'));
+    console.log(heading('CLI', 'Générateur modulaire NestJS'));
 }
 
 // ────── Helpers
@@ -226,7 +226,7 @@ function dryRunOutput(operation, plan) {
 
 export function runBashScript(scriptPath, args = [], env = {}, quiet = false) {
     const result = spawnSync('bash', [scriptPath, ...args], {
-        env: { ...process.env, ...env },
+        env: { ...process.env, ...(chalk.level === 0 ? { NO_COLOR: '1' } : {}), ...env },
         stdio: quiet ? 'pipe' : 'inherit',
     });
 
@@ -370,7 +370,7 @@ async function runInteractiveInit(options) {
         MODULES: modules.map(validateModuleName).join(' '),
     };
 
-    if (!options.quiet) console.log('\n🚀 Lancement de la génération du projet...\n');
+    if (!options.quiet) console.log(chalk.cyan('  › Génération du projet…'));
     runBashScript(GENERATE_SCRIPT, [], env, options.quiet);
     return {
         projectName: env.APP_NAME,
@@ -419,11 +419,11 @@ async function runModuleGeneration(parsed) {
     if (parsed.options.dryRun) {
         const plan = await planModuleGeneration(process.cwd(), moduleName, orm, parsed.options.application);
         const output = dryRunOutput('module', plan);
-        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
+        if (!parsed.options.json) console.log(formatPlan(output, parsed.options.verbose));
         return output;
     }
 
-    if (!parsed.options.quiet) console.log(chalk.cyan(`\n⚙️  Génération du module ${moduleName}...\n`));
+    if (!parsed.options.quiet) console.log(chalk.cyan(`  › Génération du module ${moduleName}…`));
     if (process.env.NESTGEN_ROOT) {
         runBashScript(ADD_MODULE_SCRIPT, [moduleName, orm], {}, parsed.options.quiet);
         return { module: moduleName, orm, generated: true };
@@ -548,7 +548,7 @@ async function runResourceGeneration(parsed) {
     if (parsed.options.dryRun) {
         const plan = await planResourceGeneration(process.cwd(), resourceOptions);
         const output = { ...dryRunOutput('resource', plan), ...(migration ? { migration } : {}) };
-        if (!parsed.options.json) console.log(JSON.stringify(output, null, 2));
+        if (!parsed.options.json) console.log(formatPlan(output, parsed.options.verbose));
         return output;
     }
     await generateResource(process.cwd(), resourceOptions);
@@ -564,14 +564,14 @@ async function runResourceGeneration(parsed) {
 
 function printUsage() {
     console.log(
-        `Usage: nestgen <commande> [options]\n\nCommandes:\n  init [nom]                   Génère un projet NestJS\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
+        formatHelp(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init [nom]                   Génère un projet NestJS\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
   config init|show               Gère nestgen.config.json
   doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
   --package-manager <pm>        Définit npm, pnpm ou yarn
   --project-path <chemin>       Définit le dossier parent du projet init
   --docker, --no-docker         Active ou désactive Docker pour init
   --swagger, --no-swagger       Active ou désactive Swagger pour init
-  --operations, --no-operations Active ou désactive le socle d’exploitation pour init
+  --operations, --no-operations  Active ou désactive le socle d’exploitation pour init
   --git, --no-git               Active ou désactive Git pour init
   --modules <a,b>               Définit les modules init, séparés par des virgules
   --application <nom>           Cible une application d’un workspace Nest
@@ -579,18 +579,19 @@ function printUsage() {
   --migration-name <nom>       Prépare une commande de migration officielle avec --update, sans l’appliquer
   --dry-run                    Affiche le plan sans écrire
   --json                       Retourne un résultat JSON versionné
-  --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`,
+  --indexes <a+b,c>            Ajoute des index composites ou simples\n\nChamps resource : string, number, integer, decimal(precision;scale), enum(VALEUR|VALEUR), boolean, date, uuid.`),
     );
 }
 
-function runDoctor(machine = false) {
+function runDoctor(options = {}) {
     const diagnostics = [];
     const add = (id, severity, cause, action, detail) => diagnostics.push({ id, severity, cause, action, detail });
     const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+    const supportedNode = (nodeMajor === 24 && nodeMinor >= 15) || nodeMajor === 25 || nodeMajor === 26;
     add(
         'NODE_VERSION',
-        nodeMajor === 24 && nodeMinor >= 15 ? 'INFO' : 'ERROR',
-        nodeMajor === 24 && nodeMinor >= 15 ? 'Version Node.js compatible.' : 'Node.js doit être >=24.15.0 et <27.',
+        supportedNode ? 'INFO' : 'ERROR',
+        supportedNode ? 'Version Node.js compatible.' : 'Node.js doit être >=24.15.0 et <27.',
         'Installe une version Node.js supportée puis relance doctor.',
         process.versions.node,
     );
@@ -722,9 +723,10 @@ function runDoctor(machine = false) {
             error.message,
         );
     }
-    if (!machine)
-        for (const diagnostic of diagnostics)
-            console.log(`${diagnostic.severity} ${diagnostic.id}: ${diagnostic.cause} — ${diagnostic.action}`);
+    if (!options.json) {
+        const output = formatDoctorOutput(diagnostics, options);
+        if (output) console.log(output);
+    }
     return { diagnostics, project };
 }
 
@@ -785,7 +787,15 @@ export async function main(args = process.argv.slice(2)) {
             const action = parsed.positionals[0];
             if (action === 'show') {
                 result = loadConfigIfPresent(process.cwd()) ?? defaultConfig;
-                if (!machine) console.log(JSON.stringify(result, null, 2));
+                if (!machine)
+                    console.log(
+                        formatConfig(
+                            result,
+                            fs.existsSync(path.join(process.cwd(), configFileName))
+                                ? configFileName
+                                : 'Valeurs par défaut',
+                        ),
+                    );
                 break;
             }
             if (action === 'init') {
@@ -799,25 +809,37 @@ export async function main(args = process.argv.slice(2)) {
                     throw new Error('Package manager invalide.');
                 if (parsed.options.dryRun) {
                     result = { operation: 'config-init', file: configFileName, config };
-                    if (!machine) console.log(JSON.stringify(result, null, 2));
+                    if (!parsed.options.quiet) console.log(formatConfig(config, 'Aperçu · aucun fichier écrit'));
                     break;
                 }
                 writeConfig(process.cwd(), config);
                 result = { file: configFileName, created: true, config };
-                if (!machine) console.log(configFileName);
+                if (!parsed.options.quiet) console.log(success(`Configuration créée : ${configFileName}`));
                 break;
             }
             throw new Error('config requiert init ou show.');
         }
 
         case 'doctor':
-            result = runDoctor(machine);
+            result = runDoctor(parsed.options);
             break;
 
         default:
             throw new Error(`Commande inconnue : ${parsed.command}. Utilise --help.`);
     }
     if (machine) console.log(JSON.stringify(machineResult(parsed.command, result)));
+    else if (!parsed.options.quiet && result) {
+        if (parsed.command === 'module' && result.generated)
+            console.log(success(`Module ${result.module} généré (${result.orm}).`));
+        if (parsed.command === 'resource' && result.generated) {
+            console.log(
+                success(
+                    `Ressource ${result.resource} ${result.updated ? 'mise à jour' : 'générée'} (${result.orm} · ${result.profile}).`,
+                ),
+            );
+            if (result.migration) console.log(formatMigration(result.migration));
+        }
+    }
     return result;
 }
 
@@ -826,7 +848,10 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === __filename) {
         if (process.argv.includes('--json')) {
             const message = error instanceof Error ? error.message : String(error);
             console.error(JSON.stringify({ version: 1, ok: false, error: { code: errorCode(error), message } }));
-        } else console.error(chalk.red(`❌ ${error.message}`));
+        } else {
+            if (process.argv.includes('--no-color')) chalk.level = 0;
+            console.error(formatError(error.message));
+        }
         process.exitCode = 1;
     });
 }

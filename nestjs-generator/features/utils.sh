@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+source "$(dirname "${BASH_SOURCE[0]}")/logger.sh"
+
 NEST_CLI_VERSION="12.0.0"
 
 assert_package_manager() {
@@ -7,7 +9,7 @@ assert_package_manager() {
   case "$package_manager" in
     npm|pnpm|yarn) assert_command_exists "$package_manager" ;;
     *)
-      echo "❌ Package manager non supporté : $package_manager. Valeurs acceptées : npm, pnpm, yarn."
+      log_error "Package manager non supporté : $package_manager. Valeurs acceptées : npm, pnpm, yarn."
       return 1
       ;;
   esac
@@ -57,8 +59,8 @@ nest_new() {
 assert_command_exists() {
   local CMD=$1
   if ! command -v "$CMD" &> /dev/null; then
-    echo "❌ Commande introuvable : $CMD"
-    echo "👉 Installe-la ou vérifie ton PATH"
+    log_error "Commande introuvable : $CMD"
+    log_info "Installe-la ou vérifie ton PATH"
     return 1
   fi
 }
