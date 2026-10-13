@@ -4,6 +4,12 @@ Ce projet suit [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.3 - 2026-10-13
+
+### Fixed
+
+- Suppression de la dépendance transitive vulnérable `tmp` en remplaçant l’ancien paquet `inquirer` par les modules de prompts réellement utilisés (`@inquirer/input`, `@inquirer/select` et `@inquirer/confirm`). Les parcours interactifs `init` et `module` conservent leurs choix et validations.
+
 ## 0.2.2 - 2026-10-03
 
 ### Fixed
