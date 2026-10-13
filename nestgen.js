@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
-import inquirer from 'inquirer';
+import input from '@inquirer/input';
+import select from '@inquirer/select';
+import confirm from '@inquirer/confirm';
 import chalk from 'chalk';
 import path from 'path';
 import fs from 'fs';
@@ -241,72 +243,57 @@ export function runBashScript(scriptPath, args = [], env = {}, quiet = false) {
 
 // ────── Commande : INIT
 async function askInitQuestions() {
-    return await inquirer.prompt([
-        {
-            type: 'input',
-            name: 'projectName',
-            message: '📛 Nom du projet :',
-            default: 'my-app',
-            validate: validatePromptValue(validateModuleName),
-        },
-        {
-            type: 'input',
-            name: 'projectPath',
-            message: '📁 Dossier cible :',
-            default: './',
-            validate: validatePromptValue(resolveProjectPath),
-        },
-        {
-            type: 'list',
-            name: 'packageManager',
-            message: '📦 Package manager :',
-            choices: ['pnpm', 'yarn', 'npm'],
-            default: 'pnpm',
-        },
-        {
-            type: 'list',
-            name: 'orm',
-            message: '🧠 ORM :',
-            choices: ['typeorm', 'prisma'],
-            default: 'typeorm',
-        },
-        {
-            type: 'confirm',
-            name: 'withSwagger',
-            message: '📚 Activer Swagger ?',
-            default: true,
-        },
-        {
-            type: 'confirm',
-            name: 'withDocker',
-            message: '🐳 Activer Docker ?',
-            default: false,
-        },
-        {
-            type: 'confirm',
-            name: 'withOperations',
-            message: '🩺 Activer le socle d’exploitation (santé, logs, arrêt propre) ?',
-            default: false,
-        },
-        {
-            type: 'confirm',
-            name: 'withGit',
-            message: '🔃 Initialiser Git ?',
-            default: true,
-        },
-        {
-            type: 'input',
-            name: 'modules',
-            message: '📦 Modules à générer (séparés par des espaces) :',
-            default: 'user',
-            filter: (input) =>
-                input
-                    .split(' ')
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-            validate: validatePromptValue((modules) => modules.forEach(validateModuleName)),
-        },
-    ]);
+    const projectName = await input({
+        message: '📛 Nom du projet :',
+        default: 'my-app',
+        validate: validatePromptValue(validateModuleName),
+    });
+    const projectPath = await input({
+        message: '📁 Dossier cible :',
+        default: './',
+        validate: validatePromptValue(resolveProjectPath),
+    });
+    const packageManager = await select({
+        message: '📦 Package manager :',
+        choices: ['pnpm', 'yarn', 'npm'].map((value) => ({ name: value, value })),
+        default: 'pnpm',
+    });
+    const orm = await select({
+        message: '🧠 ORM :',
+        choices: ['typeorm', 'prisma'].map((value) => ({ name: value, value })),
+        default: 'typeorm',
+    });
+    const withSwagger = await confirm({ message: '📚 Activer Swagger ?', default: true });
+    const withDocker = await confirm({ message: '🐳 Activer Docker ?', default: false });
+    const withOperations = await confirm({
+        message: '🩺 Activer le socle d’exploitation (santé, logs, arrêt propre) ?',
+        default: false,
+    });
+    const withGit = await confirm({ message: '🔃 Initialiser Git ?', default: true });
+    const modulesInput = await input({
+        message: '📦 Modules à générer (séparés par des espaces) :',
+        default: 'user',
+        validate: validatePromptValue((value) => parseModulesInput(value).forEach(validateModuleName)),
+    });
+
+    return {
+        projectName,
+        projectPath,
+        packageManager,
+        orm,
+        withSwagger,
+        withDocker,
+        withOperations,
+        withGit,
+        modules: parseModulesInput(modulesInput),
+    };
+}
+
+function parseModulesInput(value) {
+    return value
+        .split(' ')
+        .map((moduleName) => moduleName.trim())
+        .filter(Boolean);
 }
 
 function validatePromptValue(validator) {
@@ -393,23 +380,19 @@ async function runModuleGeneration(parsed) {
         orm = validateOrm(parsed.options.orm ?? config.orm);
     } else {
         if (parsed.options.noInteractive) throw new Error('module --no-interactive requiert un nom de module.');
-        const answers = await inquirer.prompt([
-            {
-                type: 'input',
-                name: 'moduleName',
+        moduleName = validateModuleName(
+            await input({
                 message: '📦 Nom du module :',
                 validate: validatePromptValue(validateModuleName),
-            },
-            {
-                type: 'list',
-                name: 'orm',
+            }),
+        );
+        orm = validateOrm(
+            await select({
                 message: '🧠 ORM utilisé :',
-                choices: ['typeorm', 'prisma'],
+                choices: ['typeorm', 'prisma'].map((value) => ({ name: value, value })),
                 default: 'typeorm',
-            },
-        ]);
-        moduleName = validateModuleName(answers.moduleName);
-        orm = validateOrm(answers.orm);
+            }),
+        );
     }
 
     if (!isNestProject()) {
