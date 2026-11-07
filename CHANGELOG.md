@@ -4,6 +4,16 @@ Ce projet suit [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.4 - 2026-11-07
+
+### Added
+
+- `nestgen check` détecte sans écriture les fichiers générés modifiés ou supprimés, avec un statut exploitable en CI et une sortie JSON.
+
+### Changed
+
+- Les empreintes des fichiers partagés sont synchronisées entre les générations ; les anciens manifestes restent vérifiables.
+
 ## 0.2.3 - 2026-10-13
 
 ### Fixed

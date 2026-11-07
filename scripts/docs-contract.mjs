@@ -12,7 +12,7 @@ const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
 
 assert.match(guide, new RegExp(`^# NestGen CLI ${version.replaceAll('.', '\\.')}$`, 'm'));
 assert.match(changelog, new RegExp(`^## ${version.replaceAll('.', '\\.')}(?:\\s|-)`, 'm'));
-for (const command of ['init', 'module', 'resource', 'config', 'doctor'])
+for (const command of ['init', 'module', 'resource', 'config', 'check', 'doctor'])
     assert.match(guide, new RegExp(`nestgen ${command}`));
 for (const option of ['--operations', '--dry-run', '--json', '--update', '--migration-name', '--application'])
     assert.match(guide, new RegExp(option.replaceAll('-', '\\-')));

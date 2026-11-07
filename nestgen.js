@@ -30,6 +30,7 @@ import {
     formatMigration,
     formatHelp,
 } from './dist/cli/output.js';
+import { checkGeneratedFiles } from './dist/engine/generation-manifest.js';
 
 // ────── Resolve __dirname compatible ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -549,6 +550,7 @@ function printUsage() {
     console.log(
         formatHelp(`Usage: nestgen <commande> [options]\n\nCommandes:\n  init [nom]                   Génère un projet NestJS\n  module <nom> [--orm <orm>]  Génère un module\n  resource <nom> --fields ...    Génère un CRUD TypeORM ou Prisma
   config init|show               Gère nestgen.config.json
+  check                          Vérifie les fichiers générés sans les modifier
   doctor                       Vérifie l'installation\n\nOptions:\n  -h, --help                   Affiche cette aide\n  -V, --version                Affiche la version\n  --no-interactive             Refuse les prompts\n  --quiet                      Supprime les sorties non essentielles\n  --verbose                    Active les diagnostics\n  --no-color                   Désactive les couleurs\n  --profile <simple|advanced>   Choisit le profil d'architecture
   --package-manager <pm>        Définit npm, pnpm ou yarn
   --project-path <chemin>       Définit le dossier parent du projet init
@@ -714,14 +716,15 @@ function runDoctor(options = {}) {
 }
 
 function machineResult(command, result) {
-    return { version: 1, ok: true, command, result };
+    return { version: 1, ok: command !== 'check' || result.ok, command, result };
 }
 
 function errorCode(error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/^(Option inconnue|Commande inconnue|.* requiert |Route ou table invalide|Nom de )/.test(message))
         return 'USAGE';
-    if (message.startsWith('Préflight échoué')) return 'PROJECT_INVALID';
+    if (message.startsWith('Préflight échoué') || message.toLowerCase().includes('manifeste de génération'))
+        return 'PROJECT_INVALID';
     if (/(existe déjà|Destination |Conflit |Transaction interrompue)/.test(message)) return 'CONFLICT';
     return 'INTERNAL';
 }
@@ -745,7 +748,9 @@ export async function main(args = process.argv.slice(2)) {
     if (parsed.options.help || !parsed.command) {
         if (machine)
             console.log(
-                JSON.stringify(machineResult('help', { commands: ['init', 'module', 'resource', 'config', 'doctor'] })),
+                JSON.stringify(
+                    machineResult('help', { commands: ['init', 'module', 'resource', 'config', 'check', 'doctor'] }),
+                ),
             );
         else printUsage();
         return;
@@ -806,6 +811,21 @@ export async function main(args = process.argv.slice(2)) {
         case 'doctor':
             result = runDoctor(parsed.options);
             break;
+
+        case 'check': {
+            if (parsed.positionals.length) throw new Error('check ne prend aucun argument.');
+            const report = checkGeneratedFiles(process.cwd());
+            result = { ok: report.missing.length === 0 && report.modified.length === 0, ...report };
+            if (!machine) {
+                if (result.ok) console.log(`${report.checkedFiles} fichiers générés vérifiés.`);
+                else {
+                    for (const file of report.missing) console.log(`MANQUANT ${file}`);
+                    for (const file of report.modified) console.log(`MODIFIÉ ${file}`);
+                }
+            }
+            if (!result.ok) process.exitCode = 1;
+            break;
+        }
 
         default:
             throw new Error(`Commande inconnue : ${parsed.command}. Utilise --help.`);
