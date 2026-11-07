@@ -1,15 +1,16 @@
 # Roadmap / Feuille de route
 
-This page describes areas under consideration after `nestgen-cli@0.2.3`. It is not a release plan, a compatibility promise or a delivery date. Cette page présente des sujets envisagés après `nestgen-cli@0.2.3` ; elle ne constitue ni un plan de livraison, ni une promesse de compatibilité, ni une date d’engagement.
+This page describes areas under consideration after `nestgen-cli@0.2.4`. It is not a release plan, a compatibility promise or a delivery date. Cette page présente des sujets envisagés après `nestgen-cli@0.2.4` ; elle ne constitue ni un plan de livraison, ni une promesse de compatibilité, ni une date d’engagement.
 
-## Published in 0.2.3 / Disponible dans 0.2.3
+## Published in 0.2.4 / Disponible dans 0.2.4
 
 - Project initialization, module and resource generation for TypeORM and Prisma.
 - Declarative fields, indexes, relations, controlled list queries, safe resource updates and migration plans.
 - Project configuration, dry-run, machine-readable output, diagnostic command, operations foundation and authorization metadata.
 - Release validation, versioned documentation and the maintained Store API example.
+- Read-only `nestgen check` for generated-file drift and synchronized fingerprints for shared files.
 
-See the [versioned guide](docs/versions/0.2.3.md) for the exact contract and limits of this release.
+See the [versioned guide](docs/versions/0.2.4.md) for the exact contract and limits of this release.
 
 ## Under consideration / À l’étude
 
