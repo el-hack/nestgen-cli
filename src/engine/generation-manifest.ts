@@ -88,6 +88,15 @@ export function loadGenerationManifest(projectRoot: string): GenerationManifest 
     const generations = (value as { generations?: unknown }).generations;
     if (!generations || typeof generations !== 'object' || Array.isArray(generations))
         throw new Error('Le manifeste de génération est invalide.');
+    for (const entry of Object.values(generations)) {
+        if (!entry || typeof entry !== 'object') throw new Error('Le manifeste de génération est invalide.');
+        const files = (entry as { files?: unknown }).files;
+        if (!files || typeof files !== 'object' || Array.isArray(files))
+            throw new Error('Le manifeste de génération est invalide.');
+        for (const fingerprint of Object.values(files))
+            if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint))
+                throw new Error('Empreinte invalide dans le manifeste de génération.');
+    }
     return normalizeManifest(value as GenerationManifest);
 }
 
@@ -151,10 +160,23 @@ export function withGenerationManifest(
             .map((change) => [change.path, sha256(change.content)] as const)
             .sort(([left], [right]) => left.localeCompare(right)),
     );
+    // A later generation can legitimately rewrite shared files (AppModule, Prisma schema,
+    // test support). Keep every owner aligned with the content committed by this transaction.
+    const generations = Object.fromEntries(
+        Object.entries(existing.generations).map(([key, entry]) => [
+            key,
+            {
+                ...entry,
+                files: Object.fromEntries(
+                    Object.entries(entry.files).map(([file, fingerprint]) => [file, files[file] ?? fingerprint]),
+                ),
+            },
+        ]),
+    );
     const manifest = normalizeManifest({
         ...existing,
         generations: {
-            ...existing.generations,
+            ...generations,
             [generationKey(definition)]: {
                 definition,
                 files,
@@ -174,6 +196,37 @@ export function withGenerationManifest(
                     : 'create',
         },
     ];
+}
+
+export type GenerationCheck = {
+    checkedFiles: number;
+    missing: string[];
+    modified: string[];
+};
+
+/** Check all recorded paths once. Older manifests may hold historical hashes for shared files. */
+export function checkGeneratedFiles(projectRoot: string): GenerationCheck {
+    const manifest = loadGenerationManifest(projectRoot);
+    if (!manifest) throw new Error('Manifeste de génération introuvable. Générez d’abord une ressource ou un module.');
+    const expected = new Map<string, Set<string>>();
+    for (const entry of Object.values(manifest.generations)) {
+        for (const [file, fingerprint] of Object.entries(entry.files)) {
+            projectPath(projectRoot, file);
+            const hashes = expected.get(file) ?? new Set<string>();
+            hashes.add(fingerprint);
+            expected.set(file, hashes);
+        }
+    }
+    if (expected.size === 0) throw new Error('Le manifeste de génération ne contient aucun fichier à vérifier.');
+    const missing: string[] = [];
+    const modified: string[] = [];
+    for (const [file, fingerprints] of [...expected].sort(([left], [right]) => left.localeCompare(right))) {
+        const target = projectPath(projectRoot, file);
+        const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+        if (!stat) missing.push(file);
+        else if (!stat.isFile() || !fingerprints.has(sha256(fs.readFileSync(target, 'utf8')))) modified.push(file);
+    }
+    return { checkedFiles: expected.size, missing, modified };
 }
 
 /** Report generated files changed after their recorded successful generation. */
