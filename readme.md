@@ -131,8 +131,11 @@ nestgen module <name> [--orm typeorm|prisma] [--application name] [--dry-run]
 nestgen resource <name> --fields name:type[,name:type] [--route route] [--table table] [--profile simple|advanced] [--application name]
 nestgen config init [--orm typeorm|prisma] [--profile simple|advanced] [--package-manager npm|pnpm|yarn]
 nestgen config show
+nestgen check
 nestgen doctor
 ```
+
+On this development branch, `nestgen check` compares the files recorded in `.nestgen/generation-manifest.json` with their current contents. It is read-only, exits with status `1` when a recorded file is missing or modified, and supports `--json` for CI. Run it from the generated Nest project. It reports generated-file drift; it does not validate runtime behavior or database migrations. New generations update recorded fingerprints for shared files such as `app.module.ts` across all affected resources. This command is not in the published 0.2.3 package.
 
 Pour la CI, `init` accepte toutes les réponses interactives sous forme d’options :
 
